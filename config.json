@@ -1,0 +1,33 @@
+{
+  "openai": {
+    "api_key": "sk-3b7873164cc06ed48ebd1816ad8874df",
+    "base_url": "https://apis.iflow.cn/v1"
+  },
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8080,
+    "debug": true
+  },
+  "model_mappings": [
+    {
+      "anthropic": "claude-3-5-haiku-20241022",
+      "openai": "glm-4.5"
+    },
+    {
+      "anthropic": "claude-3-sonnet-20240229",
+      "openai": "glm-4.6"
+    },
+    {
+      "anthropic": "claude-3-haiku-20240307",
+      "openai": "gpt-3.5-turbo"
+    },
+    {
+      "anthropic": "claude-3-5-sonnet-20241022",
+      "openai": "gpt-4o"
+    },
+    {
+      "anthropic": "",
+      "openai": ""
+    }
+  ]
+}
