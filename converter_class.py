@@ -15,11 +15,11 @@ class AnthropicToOpenAIConverter:
     def convert_messages(self, anthropic_messages: List[Dict]) -> List[Dict]:
         """将Anthropic消息格式转换为OpenAI消息格式"""
         openai_messages = []
-        
+
         for message in anthropic_messages:
             role = message.get('role', '')
             content = message.get('content', '')
-            
+
             # 角色映射
             if role == 'user':
                 openai_role = 'user'
@@ -27,25 +27,80 @@ class AnthropicToOpenAIConverter:
                 openai_role = 'assistant'
             else:
                 openai_role = 'user'  # 默认映射
-            
-            # 处理内容格式（Anthropic可能是对象数组，OpenAI是字符串或对象数组）
+
+            # 🔥 关键修复：正确处理工具调用和工具结果
             if isinstance(content, list):
-                # 如果是内容数组，提取文本
-                text_content = ''
-                for content_item in content:
-                    if content_item.get('type') == 'text':
-                        text_content += content_item.get('text', '')
-                openai_messages.append({
-                    'role': openai_role,
-                    'content': text_content
-                })
+                # 检查是否包含工具调用或工具结果
+                has_tool_calls = any(item.get('type') in ['tool_use', 'tool_result'] for item in content)
+
+                if has_tool_calls and role == 'assistant':
+                    # 处理助手工具调用，转换为OpenAI格式
+                    tool_calls = []
+                    text_content = ''
+
+                    for content_item in content:
+                        if content_item.get('type') == 'tool_use':
+                            # 转换tool_use为OpenAI的tool_calls格式
+                            tool_calls.append({
+                                'id': content_item.get('id', ''),
+                                'type': 'function',
+                                'function': {
+                                    'name': content_item.get('name', ''),
+                                    'arguments': json.dumps(content_item.get('input', {}))
+                                }
+                            })
+                        elif content_item.get('type') == 'text':
+                            text_content += content_item.get('text', '')
+
+                    openai_message = {
+                        'role': openai_role,
+                        'content': text_content if text_content else None
+                    }
+
+                    if tool_calls:
+                        openai_message['tool_calls'] = tool_calls
+
+                    openai_messages.append(openai_message)
+
+                elif has_tool_calls and role == 'user':
+                    # 处理用户工具结果，转换为OpenAI格式
+                    tool_results = []
+                    text_content = ''
+
+                    for content_item in content:
+                        if content_item.get('type') == 'tool_result':
+                            # 转换tool_result为特殊格式
+                            tool_call_id = content_item.get('tool_use_id', '')
+                            result_content = content_item.get('content', '')
+
+                            # 将工具结果作为特殊文本内容处理
+                            text_content += f"[Tool Result for {tool_call_id}]:\n{result_content}\n\n"
+                        elif content_item.get('type') == 'text':
+                            text_content += content_item.get('text', '')
+
+                    openai_messages.append({
+                        'role': openai_role,
+                        'content': text_content.strip()
+                    })
+
+                else:
+                    # 普通文本内容处理
+                    text_content = ''
+                    for content_item in content:
+                        if content_item.get('type') == 'text':
+                            text_content += content_item.get('text', '')
+
+                    openai_messages.append({
+                        'role': openai_role,
+                        'content': text_content
+                    })
             else:
                 # 如果是纯文本
                 openai_messages.append({
                     'role': openai_role,
                     'content': content
                 })
-        
+
         return openai_messages
     
     def convert_request(self, anthropic_request: Dict) -> Dict:
