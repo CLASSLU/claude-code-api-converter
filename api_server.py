@@ -247,38 +247,69 @@ class RequestDeduplicator:
         self.lock = Lock()
         
     def _generate_request_hash(self, request_data):
-        """生成请求内容的哈希值"""
-        # 只对关键字段生成哈希，忽略时间戳等动态字段
+        """生成更智能的请求哈希值"""
+        # 🔥 关键修复：提取消息的主要文本内容，去除动态字段
+        messages = request_data.get('messages', [])
+        processed_messages = []
+
+        for msg in messages:
+            if msg.get('role') == 'user':
+                # 只保留文本内容，去除动态字段
+                content = msg.get('content', '')
+                if isinstance(content, list):
+                    text_parts = []
+                    for item in content:
+                        if item.get('type') == 'text':
+                            text_parts.append(item.get('text', ''))
+                    processed_messages.append({
+                        'role': 'user',
+                        'content': ''.join(text_parts)
+                    })
+                else:
+                    processed_messages.append({
+                        'role': 'user',
+                        'content': content
+                    })
+
+        # 使用更精简的关键字段
         key_fields = {
             'model': request_data.get('model'),
-            'messages': request_data.get('messages'),
-            'max_tokens': request_data.get('max_tokens'),
-            'temperature': request_data.get('temperature'),
-            'tools': request_data.get('tools'),
-            'system': request_data.get('system')
+            'messages': processed_messages,
+            'tools': request_data.get('tools')  # 工具定义也影响响应
         }
-        
+
         # 转换为JSON字符串并生成哈希
         request_str = json.dumps(key_fields, sort_keys=True, separators=(',', ':'))
-        return hashlib.md5(request_str.encode()).hexdigest()
+        request_hash = hashlib.md5(request_str.encode()).hexdigest()
+
+        # 🔥 调试日志：监控哈希生成
+        logger.debug(f"🔍 生成请求哈希: {request_hash[:8]}... (消息数: {len(processed_messages)})")
+
+        return request_hash
     
     def is_duplicate_request(self, request_data):
         """检查是否为重复请求"""
         request_hash = self._generate_request_hash(request_data)
         current_time = time.time()
-        
+
         with self.lock:
             if request_hash in self.cache:
                 cached_time, cached_response = self.cache[request_hash]
-                
+
                 # 检查缓存是否过期
                 if current_time - cached_time < self.cache_duration:
-                    logger.info(f"🔄 检测到重复请求，使用缓存响应 (哈希: {request_hash[:8]}...)")
+                    cache_age = current_time - cached_time
+                    logger.info(f"🔄 检测到重复请求，使用缓存响应 (哈希: {request_hash[:8]}..., 缓存年龄: {cache_age:.1f}秒)")
                     return True, cached_response
                 else:
                     # 缓存过期，删除
+                    logger.debug(f"🕐 缓存已过期，删除旧缓存 (哈希: {request_hash[:8]}...)")
                     del self.cache[request_hash]
-        
+                    logger.info(f"🔍 当前缓存条目数: {len(self.cache)}")
+
+        # 🔥 监控新增请求
+        logger.info(f"🆕 新请求检测 (哈希: {request_hash[:8]}..., 当前缓存: {len(self.cache)} 条)")
+
         return False, None
     
     def cache_response(self, request_data, response):
@@ -304,8 +335,8 @@ class RequestDeduplicator:
             self.cache.clear()
         logger.info("🔄 请求去重缓存已清空")
 
-# 全局请求去重器
-request_deduplicator = RequestDeduplicator(cache_duration=30)
+# 全局请求去重器 - 🔥 增加缓存时间到5分钟
+request_deduplicator = RequestDeduplicator(cache_duration=300)
 
 def is_rate_limit_error(response):
     """检测是否为限流错误"""
