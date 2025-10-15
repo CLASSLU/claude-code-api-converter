@@ -1,0 +1,34 @@
+.worktrees
+
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+.env
+
+# Server runtime files
+*.pid
+*.lock
+api_server.log*
+api_server_*.log*
+
+# Temporary test files
+test_deduplication_fix.py
+test_simple_dedup.py
+monitor_deduplication.py
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
