@@ -1,0 +1,241 @@
+name: AI Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  issues:
+    types: [opened, edited]
+  push:
+    branches: [main, master]
+
+jobs:
+  code-review:
+    if: github.event_name == 'pull_request' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    name: Code Analysis
+
+    outputs:
+      ai-review: ${{ steps.ai-review.outputs.review }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Get Changed Files
+      id: changed_files
+      run: |
+        echo "Analyzing code changes..."
+
+        if [ "${{ github.event_name }}" = "pull_request" ]; then
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+        else
+          BASE="${{ github.event.before }}"
+          HEAD="${{ github.sha }}"
+        fi
+
+        CHANGED_FILES=$(git diff --name-only "$BASE" "$HEAD" | tr '\n' ' ')
+        echo "files=$CHANGED_FILES" >> $GITHUB_OUTPUT
+
+        echo "📝 Changed files: $CHANGED_FILES"
+
+    - name: AI Code Review
+      id: ai-review
+      run: |
+        echo "🧠 Starting comprehensive code review..."
+
+        FILES="${{ steps.changed_files.outputs.files }}"
+
+        # 专业的代码审查提示词
+        REVIEW_PROMPT="作为一名资深软件工程师和代码审查专家，请对以下代码变更进行全面分析：
+
+**变更文件列表：** $FILES
+
+**审查要求：**
+1. **代码质量评估**：评估代码结构、可读性、可维护性
+2. **最佳实践检查**：是否符合行业最佳实践和编码规范
+3. **潜在风险识别**：发现可能的bug、性能瓶颈、安全漏洞
+4. **架构设计建议**：对整体架构和设计模式提出改进意见
+5. **测试覆盖度**：评估测试需求，建议测试策略
+
+**输出要求：**
+- 使用中文回复
+- 结构清晰，重点突出
+- 提供具体的改进建议
+- 标注优先级（高/中/低）
+
+请进行专业的代码审查分析。"
+
+        echo "📤 Sending code review request to AI..."
+
+        AI_RESPONSE=$(curl -s -X POST "https://apis.iflow.cn/v1/chat/completions" \
+          -H "Content-Type: application/json" \
+          -H "Authorization: Bearer ${{ secrets.UPSTREAM_API_KEY }}" \
+          -d '{
+            "model": "glm-4.6",
+            "max_tokens": 2000,
+            "temperature": 0.2,
+            "messages": [
+              {
+                "role": "user",
+                "content": "'"$REVIEW_PROMPT"'"
+              }
+            ]
+          }')
+
+        if command -v jq &> /dev/null; then
+          CONTENT=$(echo "$AI_RESPONSE" | jq -r '.choices[0].message.content' 2>/dev/null || echo "AI响应解析失败")
+        else
+          CONTENT=$(echo "$AI_RESPONSE" | grep -o '"content":"[^"]*"' | cut -d'"' -f4 || echo "响应格式异常")
+        fi
+
+        echo "review=$CONTENT" >> $GITHUB_OUTPUT
+
+        echo "📥 AI Code Review Results:"
+        echo "$CONTENT"
+
+    - name: Create PR Comment
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const review = `${{ steps.ai-review.outputs.review }}`;
+
+          const comment = `## 🤖 AI 代码审查报告
+
+${review}
+
+---
+
+### 📊 审查信息
+- **审查模型**: GLM-4.6
+- **审查时间**: ${new Date().toLocaleString('zh-CN')}
+- **变更文件**: `${{ steps.changed_files.outputs.files }}`
+- **审查方式**: 静态分析，不影响代码合并
+
+> 📋 *此报告由 AI 自动生成，仅供参考。请结合人工审查进行最终判断。`;
+
+          if (context.payload.pull_request) {
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+          }
+
+    - name: Summary Report
+      run: |
+        echo "## 🎯 代码审查完成" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 📊 审查结果" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ 完成专业代码质量分析" >> $GITHUB_STEP_SUMMARY
+        echo "- 🔍 已分析文件：${{ steps.changed_files.outputs.files }}" >> $GITHUB_STEP_SUMMARY
+        echo "- 🤖 使用 GLM-4.6 模型" >> $GITHUB_STEP_SUMMARY
+        echo "- 📝 PR 评论已${{ github.event_name == 'pull_request' && '添加' || '跳过' }}" >> $GITHUB_STEP_SUMMARY
+
+  issue-review:
+    if: github.event_name == 'issues'
+    runs-on: ubuntu-latest
+    name: Issue Analysis
+
+    steps:
+    - name: Issue Review
+      id: issue-review
+      run: |
+        echo "🔍 Analyzing issue: #${{ github.event.issue.number }}"
+
+        ISSUE_TITLE="${{ github.event.issue.title }}"
+        ISSUE_BODY="${{ github.event.issue.body }}"
+        ISSUE_AUTHOR="${{ github.event.issue.user.login }}"
+
+        # 专业的Issue审查提示词
+        ISSUE_PROMPT="作为项目维护者和技术顾问，请对以下 GitHub Issue 进行全面评估：
+
+**Issue 标题：** $ISSUE_TITLE
+**Issue 作者：** $ISSUE_AUTHOR
+**Issue 内容：** $ISSUE_BODY
+
+**审查维度：**
+1. **问题清晰度**：问题描述是否准确、完整、无歧义
+2. **技术可行性**：当前技术栈和工具是否能解决此问题
+3. **实现难度**：评估开发复杂度、预估工作量（高中低）
+4. **优先级评估**：基于业务价值和紧急程度给出优先级建议
+5. **依赖分析**：识别可能的技术依赖、外部依赖或前置条件
+6. **风险评估**：潜在的技术风险、时间风险、资源风险
+7. **解决方案建议**：提供具体的实现思路或解决方案框架
+
+**输出格式：**
+- 使用中文回复
+- 分段清晰，逻辑连贯
+- 给出明确的建设性意见
+
+请提供专业的Issue分析和建议。"
+
+        echo "📤 Sending issue review request to AI..."
+
+        AI_RESPONSE=$(curl -s -X POST "https://apis.iflow.cn/v1/chat/completions" \
+          -H "Content-Type: application/json" \
+          -H "Authorization: Bearer ${{ secrets.UPSTREAM_API_KEY }}" \
+          -d '{
+            "model": "glm-4.6",
+            "max_tokens": 1500,
+            "temperature": 0.2,
+            "messages": [
+              {
+                "role": "user",
+                "content": "'"$ISSUE_PROMPT"'"
+              }
+            ]
+          }')
+
+        if command -v jq &> /dev/null; then
+          CONTENT=$(echo "$AI_RESPONSE" | jq -r '.choices[0].message.content' 2>/dev/null || echo "AI响应解析失败")
+        else
+          CONTENT=$(echo "$AI_RESPONSE" | grep -o '"content":"[^"]*"' | cut -d'"' -f4 || echo "响应格式异常")
+        fi
+
+        echo "📥 AI Issue Analysis Results:"
+        echo "$CONTENT"
+
+    - name: Create Issue Comment
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const issueTitle = "${{ github.event.issue.title }}";
+          const issueNumber = context.issue.number;
+
+          // 获取AI分析结果
+          const analysis = `
+## 🔍 Issue AI 分析报告
+
+${{ steps.issue-review.outputs.issue_review }}
+
+---
+
+### 📋 分析信息
+- **Issue标题**: ${issueTitle}
+- **Issue编号**: #${issueNumber}
+- **分析师**: AI Assistant (GLM-4.6)
+- **分析时间**: ${new Date().toLocaleString('zh-CN')}
+
+> 💡 *此分析由 AI 助手提供，结合人工判断进行决策。*`;
+
+          github.rest.issues.createComment({
+            issue_number: issueNumber,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: analysis
+          });
+
+    - name: Issue Summary
+      run: |
+        echo "## 🎯 Issue 分析完成" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 📊 分析结果" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ 完成Issue可行性分析" >> $GITHUB_STEP_SUMMARY
+        echo "- 🔍 分析Issue #${{ github.event.issue.number }}" >> $GITHUB_STEP_SUMMARY
+        echo "- 🤖 使用 GLM-4.6 模型" >> $GITHUB_STEP_SUMMARY
+        echo "- 💬 分析评论已添加到Issue" >> $GITHUB_STEP_SUMMARY
