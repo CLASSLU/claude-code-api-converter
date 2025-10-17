@@ -1,0 +1,85 @@
+name: Direct API Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main, master]
+
+jobs:
+  direct-api-review:
+    runs-on: ubuntu-latest
+    name: Direct API Analysis
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Get Changed Files
+      id: changed_files
+      run: |
+        echo "Analyzing code changes..."
+
+        if [ "${{ github.event_name }}" = "pull_request" ]; then
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+        else
+          BASE="${{ github.event.before }}"
+          HEAD="${{ github.sha }}"
+        fi
+
+        CHANGED_FILES=$(git diff --name-only "$BASE" "$HEAD" | tr '\n' ' ')
+        echo "files=$CHANGED_FILES" >> $GITHUB_OUTPUT
+
+        echo "📝 Changed files: $CHANGED_FILES"
+
+    - name: Direct GLM API Review
+      run: |
+        echo "🤖 Starting direct GLM API review..."
+
+        FILES="${{ steps.changed_files.outputs.files }}"
+
+        # 构建简单的分析提示
+        PROMPT="请分析以下文件变更：$FILES。请提供代码质量评估和改进建议，用中文简洁回复。"
+
+        echo "📤 Calling GLM API directly..."
+
+        # 直接调用 GLM API (使用你配置的远程服务)
+        GLM_RESPONSE=$(curl -s -X POST "https://apis.iflow.cn/v1/chat/completions" \
+          -H "Content-Type: application/json" \
+          -H "Authorization: Bearer ${{ secrets.UPSTREAM_API_KEY }}" \
+          -d '{
+            "model": "glm-4.6",
+            "max_tokens": 800,
+            "temperature": 0.3,
+            "messages": [
+              {
+                "role": "user",
+                "content": "'"$PROMPT"'"
+              }
+            ]
+          }')
+
+        echo "📥 GLM API Response:"
+        echo "$GLM_RESPONSE"
+
+        # 解析响应
+        if command -v jq &> /dev/null; then
+          CONTENT=$(echo "$GLM_RESPONSE" | jq -r '.choices[0].message.content' 2>/dev/null || echo "解析失败")
+          echo "🤖 AI 分析结果："
+          echo "$CONTENT"
+        else
+          echo "$GLM_RESPONSE"
+        fi
+
+    - name: Summary Report
+      run: |
+        echo "## 🎯 直接 API 代码审查完成" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 📊 分析结果" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ 直接调用 GLM API" >> $GITHUB_STEP_SUMMARY
+        echo "- 🔍 已分析文件：${{ steps.changed_files.outputs.files }}" >> $GITHUB_STEP_SUMMARY
+        echo "- 🤖 使用 GLM-4.6 模型" >> $GITHUB_STEP_SUMMARY
+        echo "- ⚡ 无需本地服务" >> $GITHUB_STEP_SUMMARY

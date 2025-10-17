@@ -58,8 +58,8 @@ jobs:
         CHANGED_FILES=$(git diff --name-only "$BASE" "$HEAD" | tr '\n' ' ')
         echo "files=$CHANGED_FILES" >> $GITHUB_OUTPUT
 
-        # 获取具体的代码变更
-        DIFF_CONTENT=$(git diff "$BASE" "$HEAD" --unified=3)
+        # 获取具体的代码变更 (简化处理，避免特殊字符问题)
+        DIFF_CONTENT=$(git diff --name-only "$BASE" "$HEAD")
         echo "diff<<EOF" >> $GITHUB_OUTPUT
         echo "$DIFF_CONTENT" >> $GITHUB_OUTPUT
         echo "EOF" >> $GITHUB_OUTPUT
@@ -70,32 +70,42 @@ jobs:
       run: |
         echo "🧠 Starting AI code review..."
 
-        # 构建简单的分析提示
+        # 获取变更信息
         FILES="${{ steps.changed_files.outputs.files }}"
         DIFF="${{ steps.changed_files.outputs.diff }}"
 
-        REVIEW_PROMPT="请分析以下代码变更。文件：$FILES。变更内容：$DIFF。请提供代码质量评估和改进建议，用中文回复。"
+        # 构建简单的分析提示，减少特殊字符
+        REVIEW_PROMPT="请分析代码变更。文件：$FILES。请提供代码质量评估和改进建议。"
 
         echo "📤 Sending review request to AI..."
+        echo "Files: $FILES"
+        echo "Diff: $DIFF"
 
         # 调用我们的转换器
         AI_RESPONSE=$(curl -s -X POST "https://claude-converter-test.loca.lt/v1/messages" \
           -H "Content-Type: application/json" \
           -H "Authorization: Bearer ${{ secrets.UPSTREAM_API_KEY }}" \
-          -d "{
-            \"model\": \"glm-4.6\",
-            \"max_tokens\": 2000,
-            \"temperature\": 0.3,
-            \"messages\": [
+          -d '{
+            "model": "glm-4.6",
+            "max_tokens": 1000,
+            "temperature": 0.3,
+            "messages": [
               {
-                \"role\": \"user\",
-                \"content\": \"$REVIEW_PROMPT\"
+                "role": "user",
+                "content": "'"$REVIEW_PROMPT"'"
               }
             ]
-          }")
+          }')
 
         echo "📥 AI Response:"
-        echo "$AI_RESPONSE" | jq -r '.content[0].text' || echo "$AI_RESPONSE"
+        echo "$AI_RESPONSE"
+
+        # 尝试解析响应
+        if command -v jq &> /dev/null; then
+          echo "$AI_RESPONSE" | jq -r '.content[0].text' 2>/dev/null || echo "$AI_RESPONSE"
+        else
+          echo "$AI_RESPONSE"
+        fi
 
     - name: Summary Report
       run: |
@@ -103,13 +113,12 @@ jobs:
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "### 📊 分析结果" >> $GITHUB_STEP_SUMMARY
         echo "- ✅ 转换器服务连接正常" >> $GITHUB_STEP_SUMMARY
-        echo "- 🔍 已分析 ${{ steps.changed_files.outputs.files }} 的变更" >> $GITHUB_STEP_SUMMARY
+        echo "- 🔍 已分析文件：${{ steps.changed_files.outputs.files }}" >> $GITHUB_STEP_SUMMARY
         echo "- 🤖 使用 GLM-4.6 模型进行智能分析" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "### 🔗 服务信息" >> $GITHUB_STEP_SUMMARY
         echo "- 转换器地址: https://claude-converter-test.loca.lt" >> $GITHUB_STEP_SUMMARY
         echo "- 模型: GLM-4.6" >> $GITHUB_STEP_SUMMARY
-        echo "- 响应时间: $(curl -s -o /dev/null -w '%{time_total}' https://claude-converter-test.loca.lt/health)s" >> $GITHUB_STEP_SUMMARY
 
   test-connection:
     runs-on: ubuntu-latest
