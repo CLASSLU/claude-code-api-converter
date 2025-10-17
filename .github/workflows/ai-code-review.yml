@@ -94,20 +94,23 @@ jobs:
 
         echo "📤 Sending code review request to AI..."
 
+        # 简化提示词避免shell解析问题
+        SIMPLE_PROMPT="请分析代码变更：$FILES。提供代码质量评估和改进建议。"
+
         AI_RESPONSE=$(curl -s -X POST "https://apis.iflow.cn/v1/chat/completions" \
           -H "Content-Type: application/json" \
           -H "Authorization: Bearer ${{ secrets.UPSTREAM_API_KEY }}" \
-          -d '{
-            "model": "glm-4.6",
-            "max_tokens": 2000,
-            "temperature": 0.2,
-            "messages": [
+          -d "{
+            \"model\": \"glm-4.6\",
+            \"max_tokens\": 1500,
+            \"temperature\": 0.3,
+            \"messages\": [
               {
-                "role": "user",
-                "content": "'"$REVIEW_PROMPT"'"
+                \"role\": \"user\",
+                \"content\": \"$SIMPLE_PROMPT\"
               }
             ]
-          }')
+          }")
 
         if command -v jq &> /dev/null; then
           CONTENT=$(echo "$AI_RESPONSE" | jq -r '.choices[0].message.content' 2>/dev/null || echo "AI响应解析失败")
@@ -226,20 +229,23 @@ ${review}
 
         echo "📤 Sending issue review request to AI..."
 
+        # 简化Issue提示词避免shell解析问题
+        SIMPLE_ISSUE_PROMPT="请分析Issue：标题$ISSUE_TITLE，作者$ISSUE_AUTHOR，内容$ISSUE_BODY。评估可行性并提供建议。"
+
         AI_RESPONSE=$(curl -s -X POST "https://apis.iflow.cn/v1/chat/completions" \
           -H "Content-Type: application/json" \
           -H "Authorization: Bearer ${{ secrets.UPSTREAM_API_KEY }}" \
-          -d '{
-            "model": "glm-4.6",
-            "max_tokens": 1500,
-            "temperature": 0.2,
-            "messages": [
+          -d "{
+            \"model\": \"glm-4.6\",
+            \"max_tokens\": 1200,
+            \"temperature\": 0.3,
+            \"messages\": [
               {
-                "role": "user",
-                "content": "'"$ISSUE_PROMPT"'"
+                \"role\": \"user\",
+                \"content\": \"$SIMPLE_ISSUE_PROMPT\"
               }
             ]
-          }')
+          }")
 
         if command -v jq &> /dev/null; then
           CONTENT=$(echo "$AI_RESPONSE" | jq -r '.choices[0].message.content' 2>/dev/null || echo "AI响应解析失败")
