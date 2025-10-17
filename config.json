@@ -1,8 +1,8 @@
 {
   "openai": {
-    "api_key": "BCCSPsssrS7V5NHhPTaEskhv",
-    "base_url": "https://api.gitcode.com/api/v5",
-    "test_model": "zai-org/GLM-4.6"
+    "api_key": "sk-11b8aca58e592cad27412911f86ec8b5",
+    "base_url": "https://apis.iflow.cn/v1/",
+    "test_model": "glm-4.6"
   },
   "server": {
     "host": "127.0.0.1",
@@ -13,7 +13,7 @@
     "disable_stream": false
   },
   "logging": {
-    "level": "DEBUG",
+    "level": "INFO",
     "log_to_file": true,
     "max_file_size": 10485760,
     "backup_count": 5
@@ -21,15 +21,15 @@
   "model_mappings": [
     {
       "anthropic": "claude-haiku-4-5-20251001",
-      "openai": "zai-org/GLM-4.5"
+      "openai": "glm-4.6"
     },
     {
       "anthropic": "claude-sonnet-4-5-20250929",
-      "openai": "zai-org/GLM-4.6"
+      "openai": "glm-4.6"
     },
     {
       "anthropic": "claude-3-haiku-20240307",
-      "openai": "zai-org/GLM-4.6"
+      "openai": "glm-4.6"
     }
   ]
 }

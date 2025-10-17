@@ -1,4 +1,4 @@
-name: Direct API Code Review
+name: AI Code Review
 
 on:
   pull_request:
@@ -7,9 +7,9 @@ on:
     branches: [main, master]
 
 jobs:
-  direct-api-review:
+  ai-code-review:
     runs-on: ubuntu-latest
-    name: Direct API Analysis
+    name: AI Code Analysis
 
     steps:
     - name: Checkout code
