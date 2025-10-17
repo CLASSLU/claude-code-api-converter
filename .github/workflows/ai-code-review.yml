@@ -1,0 +1,178 @@
+name: AI Code Review with External Models
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main, master]
+
+jobs:
+  ai-code-review:
+    runs-on: ubuntu-latest
+    name: AI Code Analysis
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+
+    - name: Test Converter Connection
+      run: |
+        echo "🔗 Testing connection to converter service..."
+
+        # 健康检查
+        HEALTH_RESPONSE=$(curl -s -w "%{http_code}" "https://blue-spoons-run.loca.lt/health")
+        HTTP_CODE="${HEALTH_RESPONSE: -3}"
+        BODY="${HEALTH_RESPONSE%???}"
+
+        if [ "$HTTP_CODE" = "200" ]; then
+          echo "✅ Converter service is healthy"
+          echo "Response: $BODY"
+        else
+          echo "❌ Converter service not accessible: HTTP $HTTP_CODE"
+          exit 1
+        fi
+
+    - name: Check Available Models
+      run: |
+        echo "🤖 Checking available models..."
+
+        MODELS_RESPONSE=$(curl -s "https://blue-spoons-run.loca.lt/v1/models")
+        echo "Available models: $MODELS_RESPONSE"
+
+    - name: Get Changed Files
+      id: changed_files
+      run: |
+        echo "Analyzing code changes..."
+
+        if [ "${{ github.event_name }}" = "pull_request" ]; then
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+        else
+          BASE="${{ github.event.before }}"
+          HEAD="${{ github.sha }}"
+        fi
+
+        # 获取变更的文件列表
+        CHANGED_FILES=$(git diff --name-only "$BASE" "$HEAD" | tr '\n' ' ')
+        echo "files=$CHANGED_FILES" >> $GITHUB_OUTPUT
+
+        # 获取具体的代码变更
+        DIFF_CONTENT=$(git diff "$BASE" "$HEAD" --unified=3)
+        echo "diff<<EOF" >> $GITHUB_OUTPUT
+        echo "$DIFF_CONTENT" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
+        echo "📝 Changed files: $CHANGED_FILES"
+
+    - name: AI Code Review
+      run: |
+        echo "🧠 Starting AI code review..."
+
+        # 构建分析提示
+        FILES="${{ steps.changed_files.outputs.files }}"
+        DIFF="${{ steps.changed_files.outputs.diff }}"
+
+        REVIEW_PROMPT="请作为一位经验丰富的代码审查者，分析以下代码变更：
+
+变更文件：$FILES
+
+具体变更内容：
+$DIFF
+
+请提供：
+1. 代码质量评估
+2. 潜在问题和改进建议
+3. 最佳实践建议
+4. 安全性检查（如适用）
+
+请用中文回复，格式清晰，重点突出。"
+
+        echo "📤 Sending review request to AI..."
+
+        # 调用我们的转换器
+        AI_RESPONSE=$(curl -s -X POST "https://blue-spoons-run.loca.lt/v1/messages" \
+          -H "Content-Type: application/json" \
+          -H "Authorization: Bearer ${{ secrets.UPSTREAM_API_KEY }}" \
+          -d "{
+            \"model\": \"glm-4.6\",
+            \"max_tokens\": 2000,
+            \"temperature\": 0.3,
+            \"messages\": [
+              {
+                \"role\": \"user\",
+                \"content\": \"$REVIEW_PROMPT\"
+              }
+            ]
+          }")
+
+        echo "📥 AI Response:"
+        echo "$AI_RESPONSE" | jq -r '.content[0].text' || echo "$AI_RESPONSE"
+
+    - name: Create Review Comment
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const response = require('./ai_review_response.json');
+          const comment = `
+## 🤖 AI 代码审查报告
+
+<details>
+<summary>📋 完整分析结果</summary>
+
+\`\`\`
+${response}
+\`\`\`
+
+</details>
+
+---
+*此审查由 AI 模型通过转换器服务生成*
+`;
+
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: comment
+          });
+
+    - name: Summary Report
+      run: |
+        echo "## 🎯 AI 代码审查完成" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 📊 分析结果" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ 转换器服务连接正常" >> $GITHUB_STEP_SUMMARY
+        echo "- 🔍 已分析 ${{ steps.changed_files.outputs.files }} 的变更" >> $GITHUB_STEP_SUMMARY
+        echo "- 🤖 使用 GLM-4.6 模型进行智能分析" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 🔗 服务信息" >> $GITHUB_STEP_SUMMARY
+        echo "- 转换器地址: https://blue-spoons-run.loca.lt" >> $GITHUB_STEP_SUMMARY
+        echo "- 模型: GLM-4.6" >> $GITHUB_STEP_SUMMARY
+        echo "- 响应时间: $(curl -s -o /dev/null -w '%{time_total}' https://blue-spoons-run.loca.lt/health)s" >> $GITHUB_STEP_SUMMARY
+
+  test-connection:
+    runs-on: ubuntu-latest
+    name: Connection Test
+
+    steps:
+    - name: Quick Health Check
+      run: |
+        echo "🔍 Quick health check..."
+        response=$(curl -s "https://blue-spoons-run.loca.lt/health")
+        echo "Health check response: $response"
+
+        # 检查是否包含 expected status
+        if echo "$response" | grep -q "healthy"; then
+          echo "✅ Service is healthy"
+        else
+          echo "❌ Service may have issues"
+          exit 1
+        fi
