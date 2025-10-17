@@ -1,4 +1,4 @@
-name: Professional AI Code Review
+name: AI Code Review
 
 on:
   pull_request:
@@ -6,513 +6,172 @@ on:
   issues:
     types: [opened, edited]
   push:
-    branches: [main, master]
-
-env:
-  API_BASE_URL: "https://apis.iflow.cn/v1"
-  DEFAULT_MODEL: "glm-4.6"
+    branches: [master]
 
 jobs:
-  PRReview:
+  code-review:
     if: github.event_name == 'pull_request' || github.event_name == 'push'
     runs-on: ubuntu-latest
-    name: PR代码审查
-
-    strategy:
-      matrix:
-        retry-count: [0]
-      fail-fast: false
+    name: Code Analysis
 
     steps:
-    - name: 🚀 初始化环境
-      run: |
-        echo "📋 开始 PR 代码审查工作流"
-        echo "⏰ 启动时间: $(date '+%Y-%m-%d %H:%M:%S')"
-        echo "🔧 事件类型: ${{ github.event_name }}"
-        echo "📝 仓库: ${{ github.repository }}"
-
-    - name: 📥 检出代码
+    - name: Checkout
       uses: actions/checkout@v4
       with:
         fetch-depth: 0
-        token: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: 🔍 分析变更文件
-      id: analyze-changes
+    - name: Get Files
+      id: files
       run: |
-        echo "🔍 开始分析代码变更..."
+        echo "Analyzing files..."
 
-        # 确定对比范围
         if [ "${{ github.event_name }}" = "pull_request" ]; then
           BASE="${{ github.event.pull_request.base.sha }}"
           HEAD="${{ github.event.pull_request.head.sha }}"
+          FILES=$(git diff --name-only "$BASE" "$HEAD" | tr '\n' ' ')
         else
-          BASE="${{ github.event.before }}"
-          HEAD="${{ github.sha }}"
+          # For push, get all files in the repo
+          FILES=$(find . -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.yml" -o -name "*.md" 2>/dev/null | tr '\n' ' ')
         fi
 
-        # 获取变更文件列表
-        echo "📊 计算代码差异..."
-        CHANGED_FILES=$(git diff --name-only "$BASE" "$HEAD" | tr '\n' ' ')
-        RAW_FILES_LIST=$(git diff --name-only "$BASE" "$HEAD")
+        echo "files=$FILES" >> $GITHUB_OUTPUT
+        echo "Files: $FILES"
 
-        echo "📁 变更文件列表:"
-        echo "$RAW_FILES_LIST" | while read file; do
-          echo "  - $file"
-        done
-
-        # 过滤相关文件
-        REVIEWABLE_FILES=$(echo "$RAW_FILES_LIST" | grep -E "\.(py|js|ts|jsx|tsx|java|cpp|c|h|go|rs|php|rb|swift|kt|scala|cs|vb|dart|lua|sh|yaml|yml|json|xml|html|css|scss|sass|less|md|rst|txt)$" | tr '\n' ' ')
-
-        echo "📋 可审查文件: $REVIEWABLE_FILES"
-
-        # 设置输出变量
-        echo "files=$REVIEWABLE_FILES" >> $GITHUB_OUTPUT
-        echo "raw_files<<EOF" >> $GITHUB_OUTPUT
-        echo "$RAW_FILES_LIST" >> $GITHUB_OUTPUT
-        echo 'EOF' >> $GITHUB_OUTPUT
-
-        # 获取详细的代码差异
-        if [ -n "$REVIEWABLE_FILES" ]; then
-          echo "📝 生成详细差异..."
-          DIFF_CONTENT=$(git diff "$BASE" "$HEAD" -- $REVIEWABLE_FILES)
-          echo "diff_content<<EOF" >> $GITHUB_OUTPUT
-          echo "$DIFF_CONTENT" >> $GITHUB_OUTPUT
-          echo 'EOF' >> $GITHUB_OUTPUT
-        fi
-
-    - name: 🧠 构建专业提示词
-      id: build-prompt
-      if: steps.analyze-changes.outputs.files != ''
-      run: |
-        FILES="${{ steps.analyze-changes.outputs.files }}"
-        DIFF="${{ steps.analyze-changes.outputs.diff_content }}"
-
-        # 使用heredoc安全构建多行中文提示词
-        PROFESSIONAL_REVIEW_PROMPT=$(cat <<'EOF'
-作为资深软件架构师和代码审查专家，基于20年企业级开发经验，请对以下代码变更进行深度技术评估：
-
----
-## 📋 变更概览
-**变更文件列表：FILES_PLACEHOLDER
-**审查目标：确保代码质量、架构合理性、性能优化和团队协作效率
-
-## 📊 代码差异内容
-DIFF_PLACEHOLDER
-
----
-
-## 🎯 专业评审维度
-
-### 🏗️ **架构与设计质量**
-- 代码结构是否符合SOLID原则和设计模式最佳实践
-- 模块耦合度和内聚性评估
-- 接口设计和抽象层合理性
-- 代码复用性和可扩展性分析
-
-### ⚡ **性能与效率优化**
-- 算法复杂度和执行效率评估
-- 内存使用和资源管理优化建议
-- 潜在性能瓶颈识别
-- 缓存策略和数据处理优化
-
-### 🔒 **安全性与健壮性**
-- 输入验证和边界条件处理
-- 异常处理机制的完备性
-- 潜在安全风险识别（注入、越权等）
-- 数据完整性和一致性保障
-
-### 🛠️ **代码规范与工程实践**
-- 代码可读性和维护性评估
-- 编码规范遵循度检查
-- 注释质量和文档完整性
-- 测试覆盖度和质量保证
-
-### 📈 **业务逻辑与功能实现**
-- 需求实现的准确性和完整性
-- 业务逻辑的合理性和健壮性
-- 用户体验和功能优化建议
-- 与现有系统的兼容性
-
-## 📋 输出要求
-
-请提供结构化的专业分析报告：
-
-1. **整体评估**：代码质量评分（1-10分）和总体评价
-2. **主要优点**：列出3-5个值得肯定的方面
-3. **改进建议**：按优先级（高/中/低）排序具体问题
-4. **安全风险**：识别潜在的安全隐患
-5. **性能建议**：提供可操作的性能优化方案
-6. **最佳实践**：推荐相关的行业标准或实践
-
-请用专业、准确、建设性的语言进行分析，提供具体可执行的改进建议。
-EOF
-        )
-
-        # 安全替换占位符
-        FINAL_PROMPT=$(echo "$PROFESSIONAL_REVIEW_PROMPT" | sed "s|FILES_PLACEHOLDER|$FILES|g")
-        FINAL_PROMPT=$(echo "$FINAL_PROMPT" | sed "s|DIFF_PLACEHOLDER|$DIFF|g")
-
-        # 转义为JSON安全格式
-        JSON_ESCAPED_PROMPT=$(echo "$FINAL_PROMPT" | jq -sR .)
-
-        echo "📝 提示词构建完成，长度: ${#FINAL_PROMPT} 字符"
-        echo "prompt<<EOF" >> $GITHUB_OUTPUT
-        echo "$JSON_ESCAPED_PROMPT" >> $GITHUB_OUTPUT
-        echo 'EOF' >> $GITHUB_OUTPUT
-
-    - name: 🤖 调用AI进行代码审查
+    - name: AI Review
       id: ai-review
-      if: steps.build-prompt.outputs.prompt != ''
+      if: steps.files.outputs.files != ''
+      env:
+        API_KEY: ${{ secrets.UPSTREAM_API_KEY }}
       run: |
-        echo "🚀 开始AI代码审查..."
-        START_TIME=$(date +%s)
+        echo "Starting AI review..."
 
-        # 构建请求体
-        REQUEST_BODY=$(cat <<EOF
-        {
-          "model": "${{ env.DEFAULT_MODEL }}",
-          "max_tokens": 2500,
-          "temperature": 0.3,
-          "messages": [
-            {
-              "role": "user",
-              "content": ${{ steps.build-prompt.outputs.prompt }}
-            }
-          ]
-        }
-        EOF
-        )
+        FILES="${{ steps.files.outputs.files }}"
+        REQUEST_BODY='{"model": "glm-4.6", "max_tokens": 1500, "temperature": 0.3, "messages": [{"role": "user", "content": "Analyze code changes in: '"$FILES"'. Provide brief suggestions in Chinese."}]}'
 
-        echo "📡 发送API请求到 ${{ env.API_BASE_URL }}"
+        HTTP_CODE=$(curl -s \
+          -H "Content-Type: application/json" \
+          -H "Authorization: Bearer $API_KEY" \
+          -d "$REQUEST_BODY" \
+          "https://apis.iflow.cn/v1/chat/completions" \
+          -w "%{http_code}" \
+          -o response.json)
 
-        # 带重试机制的API调用
-        MAX_RETRIES=3
-        RETRY_DELAY=5
-        ATTEMPT=1
+        echo "HTTP status: $HTTP_CODE"
 
-        while [ $ATTEMPT -le $MAX_RETRIES ]; do
-          echo "🔄 尝试第 $ATTEMPT 次 API 调用..."
-
-          # 执行API调用，包含完整的错误处理
-          HTTP_CODE=$(curl \
-            --silent \
-            --show-error \
-            --max-time 60 \
-            --request POST \
-            --url "${{ env.API_BASE_URL }}/chat/completions" \
-            --header "Content-Type: application/json; charset=utf-8" \
-            --header "Authorization: Bearer ${{ secrets.UPSTREAM_API_KEY }}" \
-            --data "$REQUEST_BODY" \
-            --output "ai_response.json" \
-            --write-out "%{http_code}")
-
-          echo "📊 HTTP状态码: $HTTP_CODE"
-
-          # 检查API调用结果
-          if [ "$HTTP_CODE" = "200" ]; then
-            echo "✅ API调用成功！"
-            break
+        if [ "$HTTP_CODE" = "200" ]; then
+          if command -v jq >/dev/null 2>&1; then
+            CONTENT=$(jq -r '.choices[0].message.content // "No content"' response.json)
           else
-            echo "❌ API调用失败，状态码: $HTTP_CODE"
-            if [ -f "ai_response.json" ]; then
-              echo "📋 错误响应:"
-              cat ai_response.json
-            fi
-
-            if [ $ATTEMPT -eq $MAX_RETRIES ]; then
-              echo "🚨 已达到最大重试次数，停止重试"
-              exit 1
-            fi
-
-            echo "⏳ 等待 $RETRY_DELAY 秒后重试..."
-            sleep $RETRY_DELAY
-            ATTEMPT=$((ATTEMPT + 1))
+            CONTENT=$(cat response.json | grep -o '"content":"[^"]*"' | cut -d'"' -f4 || "Parse error")
           fi
-        done
 
-        # 提取和处理响应
-        if [ -f "ai_response.json" ]; then
-          # 验证JSON格式
-          if jq . ai_response.json > /dev/null 2>&1; then
-            echo "✅ 响应JSON格式正确"
+          echo "AI Response: $CONTENT"
+          echo "review<<EOF" >> $GITHUB_OUTPUT
+          echo "$CONTENT" >> $GITHUB_OUTPUT
+          echo 'EOF' >> $GITHUB_OUTPUT
 
-            # 提取AI分析内容
-            ANALYSIS_CONTENT=$(jq -r '.choices[0].message.content // "响应解析失败"' ai_response.json)
-            echo "📋 AI分析内容长度: ${#ANALYSIS_CONTENT} 字符"
-
-            # 设置输出变量供后续步骤使用
-            echo "analysis_result<<EOF" >> $GITHUB_OUTPUT
-            echo "$ANALYSIS_CONTENT" >> $GITHUB_OUTPUT
-            echo 'EOF' >> $GITHUB_OUTPUT
-
-            # 保存完整响应对调试
-            echo "full_response<<EOF" >> $GITHUB_OUTPUT
-            cat ai_response.json >> $GITHUB_OUTPUT
-            echo 'EOF' >> $GITHUB_OUTPUT
-
-            # 计算执行时间
-            END_TIME=$(date +%s)
-            DURATION=$((END_TIME - START_TIME))
-            echo "⏱️ API调用耗时: ${DURATION}秒"
-            echo "duration=$DURATION" >> $GITHUB_OUTPUT
-
-          else
-            echo "❌ 响应JSON格式错误"
-            cat ai_response.json
-            exit 1
-          fi
         else
-          echo "❌ 未找到响应文件"
+          echo "API failed: $HTTP_CODE"
+          cat response.json
           exit 1
         fi
 
-    - name: 💬 创建PR评论
-      if: github.event_name == 'pull_request' && steps.ai-review.outputs.analysis_result != ''
+    - name: PR Comment
+      if: github.event_name == 'pull_request' && steps.ai-review.outputs.review != ''
       uses: actions/github-script@v7
       with:
         script: |
-          const analysis = `${{ steps.ai-review.outputs.analysis_result }}`;
-          const duration = `${{ steps.ai-review.outputs.duration }}`;
-          const changedFiles = `${{ steps.analyze-changes.outputs.files }}`;
+          const review = `${{ steps.ai-review.outputs.review }}`;
+          const comment = `## 🤖 AI 代码审查
 
-          const createFormattedComment = (analysisText, execTime, files) => {
-            let body = `## 🤖 专业AI代码审查报告\n\n`;
+${review}
 
-            body += `${analysisText}\n\n`;
-            body += `---\n\n`;
+---
+- **模型**: GLM-4.6
+- **时间**: ${new Date().toLocaleString('zh-CN')}
+- **文件**: \`${{ steps.files.outputs.files }}\`
 
-            body += `### 📊 审查信息\n`;
-            body += `- **🎯 审查模型**: GLM-4.6 (智谱AI)\n`;
-            body += `- **⏰ 审查时间**: ${new Date().toLocaleString('zh-CN')}\n`;
-            body += `- **⚡ 分析耗时**: ${execTime}秒\n`;
-            body += `- **📁 变更文件**: \`${files}\`\n`;
-            body += `- **🔧 审查方式**: 静态代码分析，不影响代码合并\n`;
-            body += `- **👨‍💻 审查引擎**: Professional Code Review v2.0\n\n`;
+> AI生成，仅供参考。`;
 
-            body += `> 💡 **说明**: 此报告由AI助手基于企业级代码审查标准生成，提供专业建议供参考。请结合项目具体情况和团队规范进行最终决策。\n\n`;
-
-            body += `---\n\n`;
-            body += `📋 *如有疑问，请在下方评论中提及 @maintainer 进行讨论*`;
-
-            return body;
-          };
-
-          try {
-            await github.rest.issues.createComment({
+          if (context.payload.pull_request) {
+            github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: createFormattedComment(analysis, duration, changedFiles)
+              body: comment
             });
-
-            console.log('✅ PR评论创建成功');
-          } catch (error) {
-            console.error('❌ 创建PR评论失败:', error);
-            core.setFailed('Failed to create PR comment');
           }
 
-    - name: 📋 生成审查摘要
+    - name: Summary
       if: always()
       run: |
-        echo "## 🎯 AI代码审查完成" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "## 审查结果" >> $GITHUB_STEP_SUMMARY
 
         if [ "${{ steps.ai-review.outcome }}" = "success" ]; then
-          echo "### ✅ 审查成功完成" >> $GITHUB_STEP_SUMMARY
-          echo "- 🤖 **AI模型**: GLM-4.6" >> $GITHUB_STEP_SUMMARY
-          echo "- ⏱️ **分析耗时**: ${{ steps.ai-review.outputs.duration }}秒" >> $GITHUB_STEP_SUMMARY
-          echo "- 📁 **审查文件**: ${{ steps.analyze-changes.outputs.files }}" >> $GITHUB_STEP_SUMMARY
-          echo "- 💬 **PR评论**: 已${{ github.event_name == 'pull_request' && '添加' || '跳过' }}" >> $GITHUB_STEP_SUMMARY
-          echo "- 📊 **审查状态**: 专业级深度分析" >> $GITHUB_STEP_SUMMARY
+          echo "✅ 审查完成" >> $GITHUB_STEP_SUMMARY
+          echo "- AI模型: GLM-4.6" >> $GITHUB_STEP_SUMMARY
+          echo "- 文件: ${{ steps.files.outputs.files }}" >> $GITHUB_STEP_SUMMARY
         else
-          echo "### ❌ 审查执行失败" >> $GITHUB_STEP_SUMMARY
-          echo "- 🔍 **失败原因**: API调用错误或处理异常" >> $GITHUB_STEP_SUMMARY
-          echo "- 📁 **目标文件**: ${{ steps.analyze-changes.outputs.files }}" >> $GITHUB_STEP_SUMMARY
-          echo "- 🔄 **建议操作**: 检查API配置和网络连接" >> $GITHUB_STEP_SUMMARY
+          echo "❌ 审查失败" >> $GITHUB_STEP_SUMMARY
         fi
 
-    - name: 🗂️ 上传调试信息
-      if: failure()
-      uses: actions/upload-artifact@v4
-      with:
-        name: debug-info-pr-${{ github.run_number }}
-        path: |
-          ai_response.json
-          *.log
-        retention-days: 7
-
-  IssueAnalysis:
+  issue-review:
     if: github.event_name == 'issues'
     runs-on: ubuntu-latest
-    name: Issue可行性分析
+    name: Issue Analysis
 
     steps:
-    - name: 🚀 初始化Issue分析
+    - name: Issue Analysis
+      id: issue-review
+      env:
+        API_KEY: ${{ secrets.UPSTREAM_API_KEY }}
       run: |
-        echo "📋 开始 Issue 可行性分析"
-        echo "🔍 Issue编号: #${{ github.event.issue.number }}"
-        echo "👤 发起者: ${{ github.event.issue.user.login }}"
-        echo "📝 标题: ${{ github.event.issue.title }}"
+        TITLE="${{ github.event.issue.title }}"
+        BODY="${{ github.event.issue.body }}"
+        AUTHOR="${{ github.event.issue.user.login }}"
 
-    - name: 🤖 调用AI分析Issue
-      id: ai-analysis
-      run: |
-        # 构建Issue分析提示词
-        ISSUE_TITLE="${{ github.event.issue.title }}"
-        ISSUE_BODY="${{ github.event.issue.body }}"
-        ISSUE_AUTHOR="${{ github.event.issue.user.login }}"
+        REQUEST_BODY='{"model": "glm-4.6", "max_tokens": 1200, "temperature": 0.3, "messages": [{"role": "user", "content": "Analyze issue: '"$TITLE"' by '"$AUTHOR"'. Content: '"$BODY"'. Provide brief assessment in Chinese."}]}'
 
-        ISSUE_ANALYSIS_PROMPT=$(cat <<'EOF'
-作为资深技术总监和产品架构师，请对以下GitHub Issue进行深度可行性评估：
-
-## 📋 Issue基本信息
-- **标题**: ISSUE_TITLE_PLACEHOLDER
-- **发起者**: ISSUE_AUTHOR_PLACEHOLDER
-- **详细内容**: ISSUE_BODY_PLACEHOLDER
-
-## 🎯 分析维度
-
-### 📊 需求分析
-- 问题陈述的清晰度和完整性评估
-- 功能需求边界和验收标准
-- 是否需要进一步需求澄清
-
-### 🏗️ 技术可行性
-- 当前技术栈支持能力分析
-- 实现复杂度和技术难点评估
-- 与现有架构的兼容性
-
-### ⏱️ 工作量评估
-- 预估开发工作量（人天）
-- 关键里程碑和交付计划
-- 依赖关系和风险评估
-
-### 💰 业务价值
-- 用户价值和业务影响评估
-- ROI和优先级分析
-- 产品战略契合度
-
-## 📋 输出要求
-请提供结构化的专业评估报告：
-1. **可行性结论**（高/中/低优先级）
-2. **技术方案建议**
-3. **工作量预估**
-4. **风险识别**
-5. **下一步行动建议**
-
-请用中文提供专业、实用的分析结果。
-EOF
-        )
-
-        # 安全替换占位符
-        FINAL_ISSUE_PROMPT=$(echo "$ISSUE_ANALYSIS_PROMPT" | sed "s|ISSUE_TITLE_PLACEHOLDER|$ISSUE_TITLE|g")
-        FINAL_ISSUE_PROMPT=$(echo "$FINAL_ISSUE_PROMPT" | sed "s|ISSUE_AUTHOR_PLACEHOLDER|$ISSUE_AUTHOR|g")
-        FINAL_ISSUE_PROMPT=$(echo "$FINAL_ISSUE_PROMPT" | sed "s|ISSUE_BODY_PLACEHOLDER|$ISSUE_BODY|g")
-
-        # JSON转义
-        JSON_ESCAPED_ISSUE_PROMPT=$(echo "$FINAL_ISSUE_PROMPT" | jq -sR .)
-
-        # 调用API分析
-        ISSUE_REQUEST_BODY=$(cat <<EOF
-        {
-          "model": "${{ env.DEFAULT_MODEL }}",
-          "max_tokens": 2000,
-          "temperature": 0.3,
-          "messages": [
-            {
-              "role": "user",
-              "content": $JSON_ESCAPED_ISSUE_PROMPT
-            }
-          ]
-        }
-        EOF
-        )
-
-        HTTP_CODE=$(curl \
-          --silent \
-          --show-error \
-          --max-time 60 \
-          --request POST \
-          --url "${{ env.API_BASE_URL }}/chat/completions" \
-          --header "Content-Type: application/json; charset=utf-8" \
-          --header "Authorization: Bearer ${{ secrets.UPSTREAM_API_KEY }}" \
-          --data "$ISSUE_REQUEST_BODY" \
-          --output "issue_response.json" \
-          --write-out "%{http_code}")
+        HTTP_CODE=$(curl -s \
+          -H "Content-Type: application/json" \
+          -H "Authorization: Bearer $API_KEY" \
+          -d "$REQUEST_BODY" \
+          "https://apis.iflow.cn/v1/chat/completions" \
+          -w "%{http_code}" \
+          -o issue_response.json)
 
         if [ "$HTTP_CODE" = "200" ]; then
-          ISSUE_ANALYSIS=$(jq -r '.choices[0].message.content // "解析失败"' issue_response.json)
-          echo "✅ Issue分析成功"
+          if command -v jq >/dev/null 2>&1; then
+            CONTENT=$(jq -r '.choices[0].message.content // "No content"' issue_response.json)
+          else
+            CONTENT=$(cat issue_response.json | grep -o '"content":"[^"]*"' | cut -d'"' -f4 || "Parse error")
+          fi
 
-          echo "analysis<<EOF" >> $GITHUB_OUTPUT
-          echo "$ISSUE_ANALYSIS" >> $GITHUB_OUTPUT
+          echo "issue_review<<EOF" >> $GITHUB_OUTPUT
+          echo "$CONTENT" >> $GITHUB_OUTPUT
           echo 'EOF' >> $GITHUB_OUTPUT
+
         else
-          echo "❌ Issue分析失败，状态码: $HTTP_CODE"
+          echo "Issue analysis failed: $HTTP_CODE"
           exit 1
         fi
 
-    - name: 💬 创建Issue评论
-      if: steps.ai-analysis.outputs.analysis != ''
+    - name: Issue Comment
       uses: actions/github-script@v7
       with:
         script: |
-          const analysis = `${{ steps.ai-analysis.outputs.analysis }}`;
-          const issueTitle = `${{ github.event.issue.title }}`;
-          const issueNumber = context.issue.number;
+          const analysis = `## 🔍 Issue分析
 
-          const analysisComment = `## 🔍 Issue AI 可行性分析报告
-
-${analysis}
+${{ steps.issue-review.outputs.issue_review }}
 
 ---
+- **Issue**: #${context.issue.number}
+- **分析**: AI Assistant (GLM-4.6)
+- **时间**: ${new Date().toLocaleString('zh-CN')}`;
 
-### 📋 分析信息
-- **📝 Issue标题**: ${issueTitle}
-- **🔢 Issue编号**: #${issueNumber}
-- **👨‍💻 分析引擎**: AI Assistant (GLM-4.6)
-- **⏰ 分析时间**: ${new Date().toLocaleString('zh-CN')}
-- **📊 分析级别**: 专业级技术评估
-
-> 💡 *此分析基于AI技术和工程评估经验提供，仅供参考。具体实施请结合团队实际情况和资源状况进行决策。*`;
-
-          try {
-            await github.rest.issues.createComment({
-              issue_number: issueNumber,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: analysisComment
-            });
-
-            console.log('✅ Issue分析评论创建成功');
-          } catch (error) {
-            console.error('❌ 创建Issue评论失败:', error);
-            core.setFailed('Failed to create issue comment');
-          }
-
-    - name: 📊 Issue分析摘要
-      if: always()
-      run: |
-        echo "## 🎯 Issue分析完成" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-
-        if [ "${{ steps.ai-analysis.outcome }}" = "success" ]; then
-          echo "### ✅ 分析成功" >> $GITHUB_STEP_SUMMARY
-          echo "- 🔍 **分析Issue**: #${{ github.event.issue.number }}" >> $GITHUB_STEP_SUMMARY
-          echo "- 🤖 **AI模型**: GLM-4.6" >> $GITHUB_STEP_SUMMARY
-          echo "- 👤 **发起者**: ${{ github.event.issue.user.login }}" >> $GITHUB_STEP_SUMMARY
-          echo "- 💬 **评论状态**: 已添加分析报告" >> $GITHUB_STEP_SUMMARY
-        else
-          echo "### ❌ 分析失败" >> $GITHUB_STEP_SUMMARY
-          echo "- 🔍 **目标Issue**: #${{ github.event.issue.number }}" >> $GITHUB_STEP_SUMMARY
-          echo "- 🔄 **建议**: 检查API配置或Issue内容" >> $GITHUB_STEP_SUMMARY
-        fi
-
-    - name: 🗂️ 上传Issue调试信息
-      if: failure()
-      uses: actions/upload-artifact@v4
-      with:
-        name: debug-info-issue-${{ github.run_number }}
-        path: issue_response.json
-        retention-days: 7
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: analysis
+          });

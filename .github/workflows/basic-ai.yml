@@ -41,8 +41,10 @@ jobs:
     - name: Analyze Changes
       id: changes
       run: |
-        FILES=$(git diff HEAD~1 HEAD --name-only | tr '\n' ' ')
+        # Since we only have one commit, check what files exist
+        FILES=$(find . -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.yml" 2>/dev/null | tr '\n' ' ')
         echo "files=$FILES" >> $GITHUB_OUTPUT
+        echo "Found files: $FILES"
 
     - name: Simple Review
       if: steps.changes.outputs.files != ''
