@@ -120,17 +120,13 @@ class SafeLogger:
             return None
 
     def _safe_format(self, message: Any, *args, **kwargs) -> str:
-        """安全格式化消息，防止格式化异常 - 强制使用ASCII避免编码问题"""
+        """安全格式化消息，防止格式化异常 - 使用UTF-8编码支持中文"""
         try:
             if isinstance(message, (dict, list)):
-                # 强制使用ASCII编码，避免中文字符导致乱码
-                message = json.dumps(message, ensure_ascii=True, default=str)
+                # 使用UTF-8编码，支持中文字符正常显示
+                message = json.dumps(message, ensure_ascii=False, default=str)
             elif not isinstance(message, str):
                 message = str(message)
-            else:
-                # 如果是中文字符串，转换为英文描述或使用ASCII
-                # 这里我们确保所有日志都是英文的
-                pass
 
             if args or kwargs:
                 return message.format(*args, **kwargs)
@@ -190,23 +186,22 @@ class SafeLogger:
                 "{}HTTP Request - Method: {}, Path: {}, Client: {}".format(prefix, method, path, client_ip)
             )
 
-            # 详细信息只在DEBUG级别记录
-            if self.level == 'DEBUG':
-                if headers:
-                    safe_headers = {k: v for k, v in headers.items()
-                                  if k.lower() not in ['authorization', 'cookie', 'x-api-key']}
-                    self.debug("{}Request Headers: {}", prefix, json.dumps(safe_headers, ensure_ascii=False))
+            # 详细信息在DEBUG级别记录
+            if headers:
+                safe_headers = {k: v for k, v in headers.items()
+                              if k.lower() not in ['authorization', 'cookie', 'x-api-key']}
+                self.debug("{}Request Headers: {}", prefix, json.dumps(safe_headers, ensure_ascii=False))
 
-                if body:
-                    try:
-                        if isinstance(body, dict):
-                            safe_body = {k: v for k, v in body.items()
-                                       if k not in ['password', 'token', 'api_key']}
-                            self.debug("{}Request Body: {}", prefix, json.dumps(safe_body, ensure_ascii=False))
-                        else:
-                            self.debug("{}Request Body: {}", prefix, str(body)[:500])
-                    except Exception:
-                        self.debug("{}Request Body: [Unable to serialize]", prefix)
+            if body:
+                try:
+                    if isinstance(body, dict):
+                        safe_body = {k: v for k, v in body.items()
+                                   if k not in ['password', 'token', 'api_key']}
+                        self.debug("{}Request Body: {}", prefix, json.dumps(safe_body, ensure_ascii=False))
+                    else:
+                        self.debug("{}Request Body: {}", prefix, str(body)[:500])
+                except Exception:
+                    self.debug("{}Request Body: [Unable to serialize]", prefix)
 
         except Exception:
             pass
@@ -220,11 +215,11 @@ class SafeLogger:
                 try:
                     if isinstance(response_data, (dict, list)):
                         safe_response = json.dumps(response_data, ensure_ascii=False, default=str)
-                        self.info("Response Body: {}", safe_response[:1000])
+                        self.debug("Response Body: {}", safe_response[:1000])
                     else:
-                        self.info("Response Body: {}", str(response_data)[:500])
+                        self.debug("Response Body: {}", str(response_data)[:500])
                 except Exception:
-                    self.info("Response Body: [Unable to serialize]")
+                    self.debug("Response Body: [Unable to serialize]")
 
         except Exception:
             pass
@@ -239,7 +234,7 @@ class SafeLogger:
             self.info("{}API Call - {}, Duration: {:.2f}ms".format(prefix, api_name, duration_ms or 0))
             
             # 详细信息只在DEBUG级别记录
-            if self.level == 'DEBUG':
+            if self.logger.isEnabledFor(logging.DEBUG):
                 log_data = {
                     "api": api_name,
                     "duration_ms": duration_ms,
@@ -261,7 +256,7 @@ class SafeLogger:
         """记录Anthropic格式请求"""
         try:
             prefix = f"[{request_id}] " if request_id else ""
-            if self.level == 'DEBUG':
+            if self.logger.isEnabledFor(logging.DEBUG):
                 self.debug("{}Anthropic Request - {}", prefix, json.dumps(anthropic_request, ensure_ascii=False, default=str))
         except Exception:
             pass
@@ -270,7 +265,7 @@ class SafeLogger:
         """记录OpenAI格式请求"""
         try:
             prefix = f"[{request_id}] " if request_id else ""
-            if self.level == 'DEBUG':
+            if self.logger.isEnabledFor(logging.DEBUG):
                 self.debug("{}OpenAI Request - {}", prefix, json.dumps(openai_request, ensure_ascii=False, default=str))
         except Exception:
             pass
@@ -279,7 +274,7 @@ class SafeLogger:
         """记录OpenAI原始响应"""
         try:
             prefix = f"[{request_id}] " if request_id else ""
-            if self.level == 'DEBUG':
+            if self.logger.isEnabledFor(logging.DEBUG):
                 self.debug("{}OpenAI Response - {}", prefix, json.dumps(openai_response, ensure_ascii=False, default=str))
         except Exception:
             pass
@@ -288,7 +283,7 @@ class SafeLogger:
         """记录Anthropic格式响应"""
         try:
             prefix = f"[{request_id}] " if request_id else ""
-            if self.level == 'DEBUG':
+            if self.logger.isEnabledFor(logging.DEBUG):
                 self.debug("{}Anthropic Response - {}", prefix, json.dumps(anthropic_response, ensure_ascii=False, default=str))
         except Exception:
             pass
