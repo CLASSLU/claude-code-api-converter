@@ -79,20 +79,23 @@ jobs:
         FILES="${{ steps.changed_files.outputs.files }}"
         DIFF="${{ steps.changed_files.outputs.diff }}"
 
-        REVIEW_PROMPT="请作为一位经验丰富的代码审查者，分析以下代码变更：
+        REVIEW_PROMPT=$(cat << EOF
+        请作为一位经验丰富的代码审查者，分析以下代码变更：
 
-变更文件：$FILES
+        变更文件：$FILES
 
-具体变更内容：
-$DIFF
+        具体变更内容：
+        $DIFF
 
-请提供：
-1. 代码质量评估
-2. 潜在问题和改进建议
-3. 最佳实践建议
-4. 安全性检查（如适用）
+        请提供：
+        1. 代码质量评估
+        2. 潜在问题和改进建议
+        3. 最佳实践建议
+        4. 安全性检查（如适用）
 
-请用中文回复，格式清晰，重点突出。"
+        请用中文回复，格式清晰，重点突出。
+        EOF
+        )
 
         echo "📤 Sending review request to AI..."
 
@@ -114,35 +117,6 @@ $DIFF
 
         echo "📥 AI Response:"
         echo "$AI_RESPONSE" | jq -r '.content[0].text' || echo "$AI_RESPONSE"
-
-    - name: Create Review Comment
-      if: github.event_name == 'pull_request'
-      uses: actions/github-script@v7
-      with:
-        script: |
-          const response = require('./ai_review_response.json');
-          const comment = `
-## 🤖 AI 代码审查报告
-
-<details>
-<summary>📋 完整分析结果</summary>
-
-\`\`\`
-${response}
-\`\`\`
-
-</details>
-
----
-*此审查由 AI 模型通过转换器服务生成*
-`;
-
-          github.rest.issues.createComment({
-            issue_number: context.issue.number,
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            body: comment
-          });
 
     - name: Summary Report
       run: |
