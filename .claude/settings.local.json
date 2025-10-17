@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(taskkill:*)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)",
+      "Bash(set PYTHONIOENCODING=utf-8)",
+      "Bash(set PYTHONLEGACYWINDOWSSTDIO=utf-8)",
+      "Bash(python -m app.server)",
+      "Bash(python:*)",
+      "Bash(chcp:*)",
+      "Bash(curl:*)",
+      "Bash(timeout 10 curl:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

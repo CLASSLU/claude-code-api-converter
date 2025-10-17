@@ -12,18 +12,24 @@ class LiteConfig:
 
     def __init__(self):
         self.config = self._load_default_config()
+        self.load_config()  # 尝试加载配置文件
+        # 重新加载环境变量以确保优先级
+        self._load_env_overrides()
 
     def _load_default_config(self):
         """加载默认配置"""
         return {
             "openai": {
                 "api_key": os.getenv('OPENAI_API_KEY', ''),
-                "base_url": os.getenv('OPENAI_BASE_URL', 'https://api.openai.com/v1')
+                "base_url": os.getenv('OPENAI_BASE_URL', 'https://apis.iflow.cn/v1')
             },
             "server": {
-                "host": os.getenv('SERVER_HOST', '0.0.0.0'),
-                "port": int(os.getenv('SERVER_PORT', '8080')),
+                "host": os.getenv('SERVER_HOST', '127.0.0.1'),
+                "port": int(os.getenv('SERVER_PORT', '10000')),
                 "debug": os.getenv('DEBUG', 'false').lower() == 'true'
+            },
+            "features": {
+                "disable_stream": False
             }
         }
 
@@ -51,6 +57,10 @@ class LiteConfig:
         if debug is not None:
             self.config['server']['debug'] = debug
 
+    def get_features(self):
+        """获取功能开关"""
+        return self.config.get('features', {"disable_stream": False})
+
     def save_config(self):
         """保存配置到文件（可选）"""
         try:
@@ -65,8 +75,32 @@ class LiteConfig:
         try:
             with open('config.json', 'r', encoding='utf-8') as f:
                 file_config = json.load(f)
-                # 合并配置，环境变量优先
-                self.config.update(file_config)
+                # 深度合并配置
+                self._deep_merge(self.config, file_config)
             return True
         except:
             return False
+
+    def _deep_merge(self, base_dict, update_dict):
+        """深度合并字典"""
+        for key, value in update_dict.items():
+            if key in base_dict and isinstance(base_dict[key], dict) and isinstance(value, dict):
+                self._deep_merge(base_dict[key], value)
+            else:
+                base_dict[key] = value
+
+    def _load_env_overrides(self):
+        """加载环境变量覆盖配置"""
+        # OpenAI配置
+        if os.getenv('OPENAI_API_KEY'):
+            self.config['openai']['api_key'] = os.getenv('OPENAI_API_KEY')
+        if os.getenv('OPENAI_BASE_URL'):
+            self.config['openai']['base_url'] = os.getenv('OPENAI_BASE_URL')
+        
+        # 服务器配置
+        if os.getenv('SERVER_HOST'):
+            self.config['server']['host'] = os.getenv('SERVER_HOST')
+        if os.getenv('SERVER_PORT'):
+            self.config['server']['port'] = int(os.getenv('SERVER_PORT'))
+        if os.getenv('DEBUG'):
+            self.config['server']['debug'] = os.getenv('DEBUG').lower() == 'true'
