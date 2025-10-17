@@ -27,7 +27,7 @@ jobs:
         echo "🔗 Testing connection to converter service..."
 
         # 健康检查
-        HEALTH_RESPONSE=$(curl -s -w "%{http_code}" "https://blue-spoons-run.loca.lt/health")
+        HEALTH_RESPONSE=$(curl -s -w "%{http_code}" "https://claude-converter-test.loca.lt/health")
         HTTP_CODE="${HEALTH_RESPONSE: -3}"
         BODY="${HEALTH_RESPONSE%???}"
 
@@ -43,7 +43,7 @@ jobs:
       run: |
         echo "🤖 Checking available models..."
 
-        MODELS_RESPONSE=$(curl -s "https://blue-spoons-run.loca.lt/v1/models")
+        MODELS_RESPONSE=$(curl -s "https://claude-converter-test.loca.lt/v1/models")
         echo "Available models: $MODELS_RESPONSE"
 
     - name: Get Changed Files
@@ -100,7 +100,7 @@ jobs:
         echo "📤 Sending review request to AI..."
 
         # 调用我们的转换器
-        AI_RESPONSE=$(curl -s -X POST "https://blue-spoons-run.loca.lt/v1/messages" \
+        AI_RESPONSE=$(curl -s -X POST "https://claude-converter-test.loca.lt/v1/messages" \
           -H "Content-Type: application/json" \
           -H "Authorization: Bearer ${{ secrets.UPSTREAM_API_KEY }}" \
           -d "{
@@ -128,9 +128,9 @@ jobs:
         echo "- 🤖 使用 GLM-4.6 模型进行智能分析" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "### 🔗 服务信息" >> $GITHUB_STEP_SUMMARY
-        echo "- 转换器地址: https://blue-spoons-run.loca.lt" >> $GITHUB_STEP_SUMMARY
+        echo "- 转换器地址: https://claude-converter-test.loca.lt" >> $GITHUB_STEP_SUMMARY
         echo "- 模型: GLM-4.6" >> $GITHUB_STEP_SUMMARY
-        echo "- 响应时间: $(curl -s -o /dev/null -w '%{time_total}' https://blue-spoons-run.loca.lt/health)s" >> $GITHUB_STEP_SUMMARY
+        echo "- 响应时间: $(curl -s -o /dev/null -w '%{time_total}' https://claude-converter-test.loca.lt/health)s" >> $GITHUB_STEP_SUMMARY
 
   test-connection:
     runs-on: ubuntu-latest
@@ -140,7 +140,7 @@ jobs:
     - name: Quick Health Check
       run: |
         echo "🔍 Quick health check..."
-        response=$(curl -s "https://blue-spoons-run.loca.lt/health")
+        response=$(curl -s "https://claude-converter-test.loca.lt/health")
         echo "Health check response: $response"
 
         # 检查是否包含 expected status
