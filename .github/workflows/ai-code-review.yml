@@ -17,11 +17,6 @@ jobs:
       with:
         fetch-depth: 0
 
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '18'
-
     - name: Test Converter Connection
       run: |
         echo "🔗 Testing connection to converter service..."
@@ -75,27 +70,11 @@ jobs:
       run: |
         echo "🧠 Starting AI code review..."
 
-        # 构建分析提示
+        # 构建简单的分析提示
         FILES="${{ steps.changed_files.outputs.files }}"
         DIFF="${{ steps.changed_files.outputs.diff }}"
 
-        REVIEW_PROMPT=$(cat << EOF
-        请作为一位经验丰富的代码审查者，分析以下代码变更：
-
-        变更文件：$FILES
-
-        具体变更内容：
-        $DIFF
-
-        请提供：
-        1. 代码质量评估
-        2. 潜在问题和改进建议
-        3. 最佳实践建议
-        4. 安全性检查（如适用）
-
-        请用中文回复，格式清晰，重点突出。
-        EOF
-        )
+        REVIEW_PROMPT="请分析以下代码变更。文件：$FILES。变更内容：$DIFF。请提供代码质量评估和改进建议，用中文回复。"
 
         echo "📤 Sending review request to AI..."
 
