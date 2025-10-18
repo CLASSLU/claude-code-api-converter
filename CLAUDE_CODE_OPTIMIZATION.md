@@ -1,8 +1,8 @@
-# Claude Code 界面闪烁问题 - 最终优化方案
+# Claude Code 界面闪烁问题优化方案
 
 ## 问题根因分析
 
-通过深度分析发现，Claude Code界面闪烁的真正原因是：
+通过深度SSE数据分析发现，Claude Code界面闪烁的真正原因是：
 
 1. **SSE脉冲式传输**: 代理API将所有数据块在同一时间点瞬间传输完成
 2. **缺乏时序控制**: 没有模拟真实API的逐步传输模式
@@ -16,7 +16,7 @@
 - **向后兼容**: 不影响其他客户端和现有功能
 
 ### 技术实现
-1. **sse_optimizer.py**: 轻量级SSE优化器
+1. **app/sse_optimizer.py**: 轻量级SSE优化器
 2. **智能缓冲机制**: 平滑数据流，避免脉冲传输
 3. **客户端检测**: 基于User-Agent自动识别
 4. **工具调用兼容**: 完全保持工具调用功能
@@ -25,11 +25,11 @@
 
 ### 新增文件
 - `app/sse_optimizer.py` - SSE流式传输优化器
-- `app/server_final.py` - 包含优化的完整服务器
-- `test_final_version.py` - 全面测试脚本
+- `app/monitoring.py` - 增强错误处理和监控
 
 ### 修改文件
-- `app/server.py` - 添加SSE优化集成
+- `app/server.py` - 集成SSE优化和监控功能
+- `config.json` - 修正默认端口为10000，移除敏感信息
 
 ## 优化效果
 
@@ -45,17 +45,33 @@
 
 ## 部署说明
 
-1. 使用 `app/server_final.py` 替换原有 `app/server.py`
-2. 确保 `app/sse_optimizer.py` 在同一目录
+1. 确保配置文件中的API密钥已正确设置
+2. 服务默认运行在端口10000
 3. 重启服务即可生效
 
-## 测试验证
+## 使用方法
 
-运行 `python test_final_version.py` 进行全面测试：
-- 基本功能测试
-- Claude Code优化验证
-- 工具调用兼容性
-- 常规客户端兼容性
+### 启动服务
+```bash
+# 前台启动
+python svc.py start
+
+# 后台启动
+python svc.py start -b
+```
+
+### 测试Claude Code优化
+```bash
+curl -X POST http://127.0.0.1:10000/v1/messages \
+  -H "Content-Type: application/json" \
+  -H "User-Agent: claude-code-router/1.0.0" \
+  -d '{
+    "model": "claude-3-5-haiku-20241022",
+    "max_tokens": 100,
+    "messages": [{"role": "user", "content": "测试"}],
+    "stream": true
+  }'
+```
 
 ---
 
