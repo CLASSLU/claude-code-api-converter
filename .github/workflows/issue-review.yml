@@ -4,6 +4,12 @@ on:
   issues:
     types: [opened, edited]
 
+# 添加必要的权限
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
 jobs:
   issue-analysis:
     runs-on: ubuntu-latest
