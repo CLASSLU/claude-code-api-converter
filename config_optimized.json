@@ -1,0 +1,60 @@
+{
+  "openai": {
+    "api_key": "${OPENAI_API_KEY}",
+    "base_url": "https://api.gitcode.com/api/v5",
+    "base_model": "zai-org/GLM-4.6"
+  },
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8080,
+    "debug": false,
+    "threaded": true
+  },
+  "features": {
+    "enable_performance_monitoring": true,
+    "enable_caching": true,
+    "enable_async_processing": true,
+    "enable_compression": true,
+    "disable_stream": false
+  },
+  "performance": {
+    "cache_ttl": 300,
+    "cache_max_size": 1000,
+    "http_pool_connections": 100,
+    "http_pool_maxsize": 100,
+    "http_max_retries": 3,
+    "http_retry_backoff": 0.3
+  },
+  "monitoring": {
+    "metrics_retention_hours": 24,
+    "slow_request_threshold_ms": 100,
+    "enable_memory_monitoring": true,
+    "enable_health_monitoring": true,
+    "circuit_breaker_failure_threshold": 5,
+    "circuit_breaker_recovery_timeout": 60
+  },
+  "logging": {
+    "level": "INFO",
+    "log_to_file": true,
+    "max_file_size": 10485760,
+    "backup_count": 5
+  },
+  "model_mappings": [
+    {
+      "anthropic": "claude-3-5-haiku-20241022",
+      "openai": "zai-org/GLM-4.6"
+    },
+    {
+      "anthropic": "claude-3-opus-20240229",
+      "openai": "zai-org/GLM-4.6"
+    },
+    {
+      "anthropic": "claude-3-sonnet-20240229",
+      "openai": "zai-org/GLM-4.6"
+    }
+  ],
+  "rate_limiting": {
+    "requests_per_minute": 1000,
+    "burst_size": 100
+  }
+}

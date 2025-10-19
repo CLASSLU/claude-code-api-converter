@@ -1,32 +1,63 @@
 """
-轻量级转换器 - 只保留核心功能
-专注于简单、快速的Anthropic到OpenAI格式转换
+优化后的API格式转换器
+支持高性能转换、缓存和完整的工具调用功能
 """
 
 import json
-import logging
 import uuid
 import re
-
-# 设置极简日志 - 只记录错误
-logging.basicConfig(level=logging.ERROR)
-logger = logging.getLogger(__name__)
+from functools import lru_cache
+from typing import Dict, Any, Optional, List
+from app.utils.performance import fast_json_dumps, fast_json_loads, optimize_string_operations
+from app.utils.cache import cache_result
+from app.logger_setup import get_logger
+from app.core.exceptions import ConversionError
 
 
 class LiteConverter:
-    """轻量级转换器 - 简单、快速、透明"""
+    """
+    优化后的轻量级转换器
+    支持高性能转换、缓存和完整的功能支持
+    """
 
     def __init__(self, model_mappings=None):
         self.model_mappings = model_mappings or []
+        self.logger = get_logger('converter', {})
+        self.compiled_patterns = optimize_string_operations()
 
+        # 预缓存模型映射
+        self._model_mapping_cache = {}
+        if self.model_mappings:
+            self._build_model_cache()
+
+    def _build_model_cache(self):
+        """构建模型映射缓存"""
+        for mapping in self.model_mappings:
+            anthropic = mapping.get('anthropic')
+            openai = mapping.get('openai')
+            if anthropic and openai:
+                self._model_mapping_cache[anthropic] = openai
+
+    @lru_cache(maxsize=1000)
     def get_mapped_model(self, anthropic_model):
-        """获取映射后的OpenAI模型名称"""
+        """
+        获取映射后的OpenAI模型名称
+        使用LRU缓存提高性能
+        """
         if not self.model_mappings:
             return anthropic_model
 
+        # 使用预构建的缓存
+        if anthropic_model in self._model_mapping_cache:
+            return self._model_mapping_cache[anthropic_model]
+
+        # 回退到线性搜索
         for mapping in self.model_mappings:
             if mapping.get('anthropic') == anthropic_model:
-                return mapping.get('openai', anthropic_model)
+                openai_model = mapping.get('openai', anthropic_model)
+                # 更新缓存
+                self._model_mapping_cache[anthropic_model] = openai_model
+                return openai_model
 
         return anthropic_model
 
@@ -102,6 +133,13 @@ class LiteConverter:
             openai_messages.append(openai_message)
 
         return openai_messages
+
+    def anthropic_to_openai(self, anthropic_request):
+        """
+        Anthropic请求格式转为OpenAI格式
+        主要转换入口点
+        """
+        return self.convert_request(anthropic_request)
 
     def convert_request(self, anthropic_request):
         """Anthropic请求格式转为OpenAI格式"""

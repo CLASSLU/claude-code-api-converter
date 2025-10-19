@@ -1,0 +1,44 @@
+{
+  "json_serialization": {
+    "standard_json_ms": 0.0309,
+    "ujson_ms": 0.3388,
+    "improvement_percent": -995.73
+  },
+  "converter_performance": {
+    "avg_conversion_ms": 0.01,
+    "total_iterations": 100,
+    "throughput_ops_per_sec": 100000
+  },
+  "cache_performance": {
+    "write_ops_per_sec": 10180,
+    "read_ops_per_sec": 1412747,
+    "avg_write_time_us": 98.24,
+    "avg_read_time_us": 0.71,
+    "hit_rate": 0.0
+  },
+  "cache_stats": {
+    "hits": 0,
+    "misses": 10100,
+    "sets": 10000,
+    "deletes": 0,
+    "evictions": 9000,
+    "size": 1000,
+    "max_size": 1000,
+    "hit_rate": 0.0,
+    "memory_usage_mb": 0.18
+  },
+  "memory_usage": {
+    "initial_mb": 44.171875,
+    "peak_mb": 44.2265625,
+    "final_mb": 44.2265625,
+    "peak_increase_mb": 0.05
+  },
+  "throughput": {
+    "operations": 7826808,
+    "duration_seconds": 10.0,
+    "ops_per_sec": 782673.95,
+    "avg_response_time_ms": 0.0013
+  },
+  "timestamp": 1760880922.5076756,
+  "timestamp_iso": "2025-10-19 21:35:22"
+}
