@@ -33,6 +33,7 @@ def log_request_info():
 
     try:
         headers = dict(request.headers)
+        body = None
         if request.is_json:
             body = request.get_json(silent=True)
     except Exception:
@@ -278,19 +279,24 @@ def messages():
                     timeout=60
                 )
 
+                try:
+                    openai_response = response.json()
+                except:
+                    openai_response = {'error': {'message': response.text}}
+
+                # 检查响应体中的状态字段（某些API使用这种方式）
+                api_status = openai_response.get('status')
+                if api_status and api_status != '200':
+                    # API返回了错误状态，直接传递给下游
+                    return jsonify(openai_response), int(api_status)
+
                 if response.status_code == 200:
                     # 转换回Anthropic格式
-                    openai_response = response.json()
                     anthropic_response = converter.openai_to_anthropic(openai_response)
                     return jsonify(anthropic_response)
                 else:
-                    return jsonify({
-                        'type': 'error',
-                        'error': {
-                            'type': 'api_error',
-                            'message': response.text
-                        }
-                    }), response.status_code
+                    # 对于HTTP错误状态码，直接返回原始响应和状态码，让下游处理
+                    return jsonify(openai_response), response.status_code
 
             except Exception as e:
                 logger.log_exception(e, "non-stream messages endpoint")

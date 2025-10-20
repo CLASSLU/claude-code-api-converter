@@ -206,20 +206,17 @@ class SafeLogger:
         except Exception:
             pass
 
-    def log_response(self, status_code: int, response_data: Optional[Any] = None):
+    def log_response(self, status_code: int, duration_ms: Optional[float] = None,
+                   response_size: Optional[int] = None, request_id: str = None):
         """记录HTTP响应"""
         try:
-            self.info("HTTP Response - Status: {}", status_code)
+            prefix = f"[{request_id}] " if request_id else ""
+            self.info("{}HTTP Response - Status: {}".format(prefix, status_code))
 
-            if response_data:
-                try:
-                    if isinstance(response_data, (dict, list)):
-                        safe_response = json.dumps(response_data, ensure_ascii=False, default=str)
-                        self.debug("Response Body: {}", safe_response[:1000])
-                    else:
-                        self.debug("Response Body: {}", str(response_data)[:500])
-                except Exception:
-                    self.debug("Response Body: [Unable to serialize]")
+            if duration_ms is not None:
+                self.debug("{}Response Time: {:.2f}ms".format(prefix, duration_ms))
+            if response_size is not None:
+                self.debug("{}Response Size: {} bytes".format(prefix, response_size))
 
         except Exception:
             pass

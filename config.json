@@ -1,8 +1,8 @@
 {
   "openai": {
-    "api_key": "your-api-key-here",
-    "base_url": "https://api.openai.com/v1/",
-    "base_model": "gpt-3.5-turbo"
+    "api_key": "sk-11b8aca58e592cad27412911f86ec8b5",
+    "base_url": "https://apis.iflow.cn/v1",
+    "base_model": "glm-4.6"
   },
   "server": {
     "host": "0.0.0.0",
@@ -21,7 +21,7 @@
   "model_mappings": [
     {
       "anthropic": "claude-3-5-haiku-20241022",
-      "openai": "gpt-3.5-turbo"
+      "openai": "glm-4.6"
     }
   ]
 }

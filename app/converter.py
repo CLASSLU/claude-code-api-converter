@@ -378,3 +378,11 @@ class LiteConverter:
             })
 
         return tools
+
+    def anthropic_to_openai(self, anthropic_request):
+        """Anthropic请求格式转为OpenAI格式 - 兼容性方法"""
+        return self.convert_request(anthropic_request)
+
+    def openai_to_anthropic(self, openai_response):
+        """OpenAI响应格式转为Anthropic格式 - 兼容性方法"""
+        return self.convert_response(openai_response)
