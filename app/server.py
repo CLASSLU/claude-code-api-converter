@@ -155,21 +155,32 @@ def messages():
                 logger.debug(f"[SERVER_DEBUG] Upstream response status code: {response.status_code}")
 
                 if response.status_code != 200:
-                    # 特殊处理429速率限制错误
-                    if response.status_code == 429:
-                        logger.debug(f"[SERVER_DEBUG] Got 429 rate limit error from upstream")
+                    # 特殊处理429和449速率限制错误，统一转换为429
+                    if response.status_code in [429, 449]:
+                        converted_status = 429
+                        logger.debug(f"[SERVER_DEBUG] Got {response.status_code} rate limit error from upstream, converting to {converted_status}")
+
+                        # 尝试解析上游错误消息
+                        error_message = 'Your account has hit a rate limit.'
+                        try:
+                            error_data = response.json()
+                            if isinstance(error_data, dict):
+                                error_message = error_data.get('msg') or error_data.get('message', error_message)
+                        except:
+                            error_message = response.text or error_message
+
                         error_response = jsonify({
                             'type': 'error',
                             'error': {
                                 'type': 'rate_limit_error',
-                                'message': 'Your account has hit a rate limit.'
+                                'message': error_message
                             }
                         })
-                        # 添加retry-after头，告诉Claude Code何时重试
+                        # 添加符合Anthropic规范的retry-after头
                         error_response.headers['retry-after'] = '60'  # 60秒后重试
                         error_response.headers['anthropic-ratelimit-requests-limit'] = '60'
                         error_response.headers['anthropic-ratelimit-requests-remaining'] = '0'
-                        return error_response, 429
+                        return error_response, converted_status
                     else:
                         return jsonify({
                             'type': 'error',
@@ -251,20 +262,30 @@ def messages():
                     anthropic_response = converter.openai_to_anthropic(openai_response)
                     return jsonify(anthropic_response)
                 else:
-                    # 对于HTTP错误状态码，特殊处理429速率限制错误
-                    if response.status_code == 429:
+                    # 对于HTTP错误状态码，特殊处理429和449速率限制错误
+                    if response.status_code in [429, 449]:
+                        converted_status = 429
+                        # 尝试解析上游错误消息
+                        error_message = 'Your account has hit a rate limit.'
+                        try:
+                            error_data = response.json()
+                            if isinstance(error_data, dict):
+                                error_message = error_data.get('msg') or error_data.get('message', error_message)
+                        except:
+                            error_message = response.text or error_message
+
                         error_response = jsonify({
                             'type': 'error',
                             'error': {
                                 'type': 'rate_limit_error',
-                                'message': 'Your account has hit a rate limit.'
+                                'message': error_message
                             }
                         })
-                        # 添加retry-after头，告诉Claude Code何时重试
+                        # 添加符合Anthropic规范的retry-after头
                         error_response.headers['retry-after'] = '60'  # 60秒后重试
                         error_response.headers['anthropic-ratelimit-requests-limit'] = '60'
                         error_response.headers['anthropic-ratelimit-requests-remaining'] = '0'
-                        return error_response, 429
+                        return error_response, converted_status
                     else:
                         # 其他HTTP错误，直接返回原始响应和状态码，让下游处理
                         return jsonify(openai_response), response.status_code

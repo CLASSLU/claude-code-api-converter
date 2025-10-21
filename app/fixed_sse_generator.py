@@ -151,7 +151,7 @@ class FixedSSEGenerator:
         yield self._create_content_block_stop(self.current_text_block)
 
         # 4. 创建message_delta
-        yield self._create_message_delta(stop_reason="end_turn")
+        yield self._create_message_delta(stop_reason="end_turn", output_tokens=1)
 
         # 5. 创建message_stop
         yield self._create_message_stop()
@@ -191,8 +191,10 @@ class FixedSSEGenerator:
                 if status_code != 200:
                     self.logger.info(f"[FIXED_SSE_DEBUG] Upstream API returned status code: {status_code}")
                     # 处理上游API错误情况
-                    if status_code == 429:
-                        self.logger.info(f"[FIXED_SSE_DEBUG] Using 429 error stream to avoid UI flicker")
+                    # 429和449都视为限流错误，统一转换为429
+                    if status_code in [429, 449]:
+                        converted_status = 429
+                        self.logger.info(f"[FIXED_SSE_DEBUG] Converting {status_code} to {converted_status} error stream to avoid UI flicker")
                         for event in self._create_rate_limit_error_stream():
                             yield event
                         return
@@ -214,19 +216,32 @@ class FixedSSEGenerator:
 
                 # 检查是否是直接的响应（不以data:开头）
                 if not line.startswith('data:'):
-                    # 检查是否是429错误格式
-                    if '"status":"429"' in line or '"status": "429"' in line:
-                        self.logger.info(f"[FIXED_SSE_DEBUG] Detected 429 error in non-SSE format: {line}")
+                    # 检查是否是429或449错误格式（上游限流错误）
+                    rate_limit_patterns = [
+                        '"status":"429"', '"status": "429"',
+                        '"status":"449"', '"status": "449"',
+                        'rate limit', 'Rate limit',
+                        'exceeded.*limit', 'limit.*exceeded'
+                    ]
+
+                    is_rate_limit_error = any(pattern in line for pattern in rate_limit_patterns)
+
+                    if is_rate_limit_error:
+                        self.logger.info(f"[FIXED_SSE_DEBUG] Detected rate limit error in non-SSE format: {line}")
                         # 尝试解析JSON
                         try:
                             error_data = json.loads(line)
                             message = error_data.get('msg', 'Rate limit exceeded')
-                            self.logger.info(f"[FIXED_SSE_DEBUG] Using 429 error stream for non-SSE response")
-                            for event in self._create_rate_limit_error_stream(message):
-                                yield event
-                            return
+                            status = error_data.get('status', '429')
+
+                            # 统一转换为429错误
+                            if status in ['429', '449']:
+                                self.logger.info(f"[FIXED_SSE_DEBUG] Converting {status} to 429 error stream for non-SSE response")
+                                for event in self._create_rate_limit_error_stream(message):
+                                    yield event
+                                return
                         except Exception as e:
-                            self.logger.info(f"[FIXED_SSE_DEBUG] Failed to parse 429 error: {e}")
+                            self.logger.info(f"[FIXED_SSE_DEBUG] Failed to parse rate limit error: {e}")
                             # 使用默认错误消息
                             for event in self._create_rate_limit_error_stream():
                                 yield event
@@ -301,14 +316,23 @@ class FixedSSEGenerator:
                     continue
 
                 # 检查是否是错误格式的响应
-                if 'status' in evt and 'msg' in evt:
+                if 'status' in evt and ('msg' in evt or 'message' in evt):
                     status = evt.get('status', '429')
-                    message = evt.get('msg', 'Rate limit exceeded')
+                    message = evt.get('msg') or evt.get('message', 'Rate limit exceeded')
                     self.logger.info(f"[FIXED_SSE_DEBUG] Detected error response: {evt}")
 
-                    # 如果是429错误，使用完整的错误流避免闪烁
-                    if status == '429' or 'rate limit' in message.lower():
-                        self.logger.info(f"[FIXED_SSE_DEBUG] Using 429 error stream for SSE error response")
+                    # 处理限流错误：429、449都转换为429
+                    rate_limit_statuses = ['429', '449']
+                    is_rate_limit = (
+                        status in rate_limit_statuses or
+                        'rate limit' in message.lower() or
+                        'exceeded' in message.lower() and 'limit' in message.lower()
+                    )
+
+                    if is_rate_limit:
+                        # 统一转换为标准的429限流错误
+                        converted_status = '429'
+                        self.logger.info(f"[FIXED_SSE_DEBUG] Converting {status} to {converted_status} rate limit error stream")
                         for event in self._create_rate_limit_error_stream(message):
                             yield event
                         return
