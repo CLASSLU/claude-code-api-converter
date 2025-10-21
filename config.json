@@ -13,7 +13,7 @@
     "disable_stream": false
   },
   "logging": {
-    "level": "INFO",
+    "level": "DEBUG",
     "log_to_file": true,
     "max_file_size": 10485760,
     "backup_count": 5

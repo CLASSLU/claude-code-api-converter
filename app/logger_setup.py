@@ -39,7 +39,7 @@ class SafeLogger:
     def _setup_logger(self) -> logging.Logger:
         """设置日志记录器"""
         logger = logging.getLogger(self.name)
-        logger.setLevel(getattr(logging, self.level.upper(), logging.INFO))
+        logger.setLevel(getattr(logging, self._get_log_level().upper(), logging.INFO))
 
         # 清除现有的处理器
         logger.handlers.clear()

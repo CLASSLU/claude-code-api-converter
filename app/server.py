@@ -13,12 +13,13 @@ import json
 from .converter import LiteConverter
 from .config import LiteConfig
 from .logger_setup import get_logger
-from .sse_optimizer import get_sse_optimizer
+from .simple_sse_optimizer import get_simple_sse_optimizer
+from .fixed_sse_generator import create_fixed_sse_generator
 
 # 初始化配置
 config = LiteConfig()
 logger = get_logger('api_server', config.config.get('logging', {}))
-sse_optimizer = get_sse_optimizer()
+sse_optimizer = get_simple_sse_optimizer()
 
 app = Flask(__name__)
 converter = LiteConverter(model_mappings=config.config.get('model_mappings', []))
@@ -55,12 +56,16 @@ def log_response_info(response):
     if hasattr(request, 'start_time') and hasattr(request, 'request_id'):
         end_time = time.time()
         duration = (end_time - request.start_time) * 1000
-        logger.log_response(
-            status_code=response.status_code,
-            duration_ms=duration,
-            response_size=len(response.get_data()) if hasattr(response, 'get_data') else 0,
-            request_id=request.request_id
-        )
+        # 简化日志调用，避免参数错误
+        try:
+            logger.log_response(
+                status_code=response.status_code,
+                duration_ms=duration,
+                response_size=len(response.get_data()) if hasattr(response, 'get_data') else 0,
+                request_id=request.request_id
+            )
+        except Exception as e:
+            logger.info(f"[{request.request_id}] HTTP Response - Status: {response.status_code} (logging error: {e})")
         logger.info(f"[{request.request_id}] Request completed in {duration:.2f}ms")
     return response
 
@@ -73,125 +78,33 @@ def health():
         'version': '1.0.0'
     }), 200
 
-def create_optimized_sse_generator(upstream, request_headers):
-    """创建优化的SSE生成器，保持工具调用兼容性"""
+def create_optimized_sse_generator(upstream, request_headers, model_name, input_tokens=0):
+    """创建修复后的SSE生成器，解决UI闪烁问题"""
 
-    def original_sse_passthrough():
-        """原始SSE传输逻辑，保持完整功能"""
-        msg_id = f"msg_{uuid.uuid4().hex[:24]}"
-        model_name = request.get_json().get('model', '')
+    logger.info(f"[SSE_DEBUG] Creating optimized SSE generator for model: {model_name}")
 
-        # 发送标准事件头
-        yield f"data: {json.dumps({'type':'message_start','message':{'id':msg_id,'type':'message','role':'assistant','content':[],'model':model_name}}, ensure_ascii=False)}\n\n"
-        yield f"data: {json.dumps({'type':'content_block_start','index':0,'content_block':{'type':'text','text':''}}, ensure_ascii=False)}\n\n"
+    # 检查是否需要优化（暂时禁用，使用修复后的生成器）
+    should_opt = sse_optimizer.should_optimize(request_headers)
+    enable_delay = should_opt  # 只在需要优化时启用延迟
 
-        try:
-            tool_started = False
-            tool_id = None
-            tool_name = None
+    logger.info(f"[SSE_DEBUG] SSE optimization enabled: {enable_delay} for User-Agent: {request_headers.get('User-Agent', 'Unknown')}")
 
-            # 处理流式数据
-            for raw in upstream.iter_lines(decode_unicode=False):
-                if not raw:
-                    continue
-
-                # 简化编码处理
-                if isinstance(raw, bytes):
-                    line = raw.decode('utf-8', errors='replace').strip()
-                else:
-                    line = raw.strip()
-
-                if not line.startswith('data:'):
-                    continue
-                payload = line[5:].strip()
-                if payload == '[DONE]':
-                    break
-
-                try:
-                    evt = json.loads(payload)
-                except Exception:
-                    continue
-
-                choices = evt.get('choices') or []
-                if choices:
-                    delta = choices[0].get('delta') or {}
-
-                    # 完整的工具调用支持
-                    tool_calls = delta.get('tool_calls', [])
-                    if tool_calls:
-                        for tool_call_delta in tool_calls:
-                            if not tool_started:
-                                tool_started = True
-                                tool_id = tool_call_delta.get('id', f"tool_{uuid.uuid4().hex[:24]}")
-                                function_delta = tool_call_delta.get('function', {})
-                                tool_name = function_delta.get('name', '')
-
-                                if tool_name:
-                                    start_evt = {
-                                        'type': 'content_block_start',
-                                        'index': 0,
-                                        'content_block': {
-                                            'type': 'tool_use',
-                                            'id': tool_id,
-                                            'name': tool_name,
-                                            'input': {}
-                                        }
-                                    }
-                                    yield f"data: {json.dumps(start_evt, ensure_ascii=False)}\n\n"
-
-                            # 处理参数片段
-                            args_chunk = function_delta.get('arguments', '') if 'function_delta' in locals() else tool_call_delta.get('function', {}).get('arguments', '')
-                            if args_chunk:
-                                yield f"data: {json.dumps({'type':'input_json_delta','index':0,'delta': args_chunk}, ensure_ascii=False)}\n\n"
-
-                    elif delta.get('function_call'):  # 兼容旧格式
-                        fc = delta.get('function_call') or {}
-                        if fc.get('name'):
-                            if not tool_started:
-                                tool_started = True
-                                tool_id = f"tool_{uuid.uuid4().hex[:24]}"
-                                tool_name = fc.get('name')
-                                start_evt = {
-                                    'type': 'content_block_start',
-                                    'index': 0,
-                                    'content_block': {
-                                        'type': 'tool_use',
-                                        'id': tool_id,
-                                        'name': tool_name,
-                                        'input': {}
-                                    }
-                                }
-                                yield f"data: {json.dumps(start_evt, ensure_ascii=False)}\n\n"
-                            args_chunk = fc.get('arguments') or ''
-                            if args_chunk:
-                                yield f"data: {json.dumps({'type':'input_json_delta','index':0,'delta': args_chunk}, ensure_ascii=False)}\n\n"
-
-                    else:
-                        # 普通文本内容
-                        text_delta = delta.get('content') or ''
-                        if text_delta:
-                            yield f"data: {json.dumps({'type':'content_block_delta','index':0,'delta':{'type':'text_delta','text': text_delta}}, ensure_ascii=False)}\n\n"
-
-            # 结束事件序列
-            if tool_started:
-                yield f"data: {json.dumps({'type':'content_block_stop','index':0}, ensure_ascii=False)}\n\n"
-            else:
-                yield f"data: {json.dumps({'type':'content_block_stop','index':0}, ensure_ascii=False)}\n\n"
-
-            yield f"data: {json.dumps({'type':'message_delta','delta':{'stop_reason':'end_turn'}}, ensure_ascii=False)}\n\n"
-            yield f"data: {json.dumps({'type':'message_stop'}, ensure_ascii=False)}\n\n"
-            yield "data: [DONE]\n\n"
-
-        except Exception as e:
-            err = {'type': 'error', 'error': {'type': 'stream_error', 'message': str(e)}}
-            yield f"data: {json.dumps(err, ensure_ascii=False)}\n\n"
-            yield "data: [DONE]\n\n"
-
-    # 检查是否需要优化
-    if sse_optimizer.should_optimize(request_headers):
-        return sse_optimizer.create_optimized_generator(original_sse_passthrough())
-    else:
-        return original_sse_passthrough()
+    try:
+        # 使用修复后的SSE生成器
+        logger.info(f"[SSE_DEBUG] Calling create_fixed_sse_generator...")
+        result = create_fixed_sse_generator(
+            upstream_response=upstream,
+            model_name=model_name,
+            input_tokens=input_tokens,
+            enable_delay=enable_delay
+        )
+        logger.info(f"[SSE_DEBUG] Fixed SSE generator created successfully")
+        return result
+    except Exception as e:
+        logger.error(f"[SSE_DEBUG] Error creating fixed SSE generator: {e}")
+        # 降级到原始流
+        logger.info(f"[SSE_DEBUG] Falling back to original stream")
+        return upstream.iter_lines(decode_unicode=False)
 
 @app.route('/v1/messages', methods=['POST'])
 def messages():
@@ -239,18 +152,55 @@ def messages():
                     timeout=60
                 )
 
+                logger.debug(f"[SERVER_DEBUG] Upstream response status code: {response.status_code}")
+
                 if response.status_code != 200:
-                    return jsonify({
-                        'type': 'error',
-                        'error': {
-                            'type': 'api_error',
-                            'message': response.text
-                        }
-                    }), response.status_code
+                    # 特殊处理429速率限制错误
+                    if response.status_code == 429:
+                        logger.debug(f"[SERVER_DEBUG] Got 429 rate limit error from upstream")
+                        error_response = jsonify({
+                            'type': 'error',
+                            'error': {
+                                'type': 'rate_limit_error',
+                                'message': 'Your account has hit a rate limit.'
+                            }
+                        })
+                        # 添加retry-after头，告诉Claude Code何时重试
+                        error_response.headers['retry-after'] = '60'  # 60秒后重试
+                        error_response.headers['anthropic-ratelimit-requests-limit'] = '60'
+                        error_response.headers['anthropic-ratelimit-requests-remaining'] = '0'
+                        return error_response, 429
+                    else:
+                        return jsonify({
+                            'type': 'error',
+                            'error': {
+                                'type': 'api_error',
+                                'message': response.text
+                            }
+                        }), response.status_code
 
                 # 创建优化的SSE流
+                model_name = anthropic_request.get('model', '')
+                logger.debug(f"[SERVER_DEBUG] Creating optimized SSE generator for model: {model_name}")
+
+                # 计算input_tokens（简单估算）
+                input_tokens = 0
+                if 'messages' in anthropic_request:
+                    for msg in anthropic_request['messages']:
+                        if isinstance(msg.get('content'), str):
+                            input_tokens += len(msg['content']) // 4
+                        elif isinstance(msg.get('content'), list):
+                            for item in msg.get('content', []):
+                                if item.get('type') == 'text':
+                                    input_tokens += len(item.get('text', '')) // 4
+
+                if 'system' in anthropic_request:
+                    input_tokens += len(anthropic_request['system']) // 4
+
+                input_tokens = max(1, input_tokens)  # 至少1个token
+
                 return Response(
-                    create_optimized_sse_generator(response, request.headers),
+                    create_optimized_sse_generator(response, request.headers, model_name, input_tokens),
                     headers={
                         'Content-Type': 'text/event-stream',
                         'Cache-Control': 'no-cache',
@@ -291,12 +241,33 @@ def messages():
                     return jsonify(openai_response), int(api_status)
 
                 if response.status_code == 200:
+                    # 检查是否为错误响应（没有choices字段）
+                    if not openai_response.get('choices'):
+                        # 检查是否有状态字段，如果有则使用该状态码
+                        error_status = openai_response.get('status', 500)
+                        return jsonify(openai_response), int(error_status)
+
                     # 转换回Anthropic格式
                     anthropic_response = converter.openai_to_anthropic(openai_response)
                     return jsonify(anthropic_response)
                 else:
-                    # 对于HTTP错误状态码，直接返回原始响应和状态码，让下游处理
-                    return jsonify(openai_response), response.status_code
+                    # 对于HTTP错误状态码，特殊处理429速率限制错误
+                    if response.status_code == 429:
+                        error_response = jsonify({
+                            'type': 'error',
+                            'error': {
+                                'type': 'rate_limit_error',
+                                'message': 'Your account has hit a rate limit.'
+                            }
+                        })
+                        # 添加retry-after头，告诉Claude Code何时重试
+                        error_response.headers['retry-after'] = '60'  # 60秒后重试
+                        error_response.headers['anthropic-ratelimit-requests-limit'] = '60'
+                        error_response.headers['anthropic-ratelimit-requests-remaining'] = '0'
+                        return error_response, 429
+                    else:
+                        # 其他HTTP错误，直接返回原始响应和状态码，让下游处理
+                        return jsonify(openai_response), response.status_code
 
             except Exception as e:
                 logger.log_exception(e, "non-stream messages endpoint")
