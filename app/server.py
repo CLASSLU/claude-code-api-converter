@@ -52,10 +52,34 @@ def log_request_info():
 
 @app.after_request
 def log_response_info(response):
-    """记录响应信息"""
+    """记录响应信息并拦截449错误"""
     if hasattr(request, 'start_time') and hasattr(request, 'request_id'):
         end_time = time.time()
         duration = (end_time - request.start_time) * 1000
+
+        # 终极449拦截 - 确保没有任何449能泄漏出去
+        if response.status_code == 449:
+            logger.info(f"[449_DEBUG] **** FINAL 449 INTERCEPTION **** Caught 449 in after_request, forcing conversion to 429")
+
+            # 强制转换为429速率限制错误
+            from flask import jsonify
+            error_response = jsonify({
+                'type': 'error',
+                'error': {
+                    'type': 'rate_limit_error',
+                    'message': 'You exceeded your current rate limit'
+                }
+            })
+            error_response.status_code = 429
+            error_response.headers['retry-after'] = '60'
+            error_response.headers['anthropic-ratelimit-requests-limit'] = '60'
+            error_response.headers['anthropic-ratelimit-requests-remaining'] = '0'
+
+            # 记录转换
+            logger.info(f"[{request.request_id}] HTTP Response - Status: 429 (converted from 449)")
+            logger.info(f"[{request.request_id}] Request completed in {duration:.2f}ms")
+            return error_response
+
         # 简化日志调用，避免参数错误
         try:
             logger.log_response(
@@ -109,6 +133,8 @@ def create_optimized_sse_generator(upstream, request_headers, model_name, input_
 @app.route('/v1/messages', methods=['POST'])
 def messages():
     """Anthropic消息API - 包含流式优化"""
+    # 强制记录所有请求开始
+    logger.info(f"[449_DEBUG] ===== /v1/messages request started =====")
     try:
         anthropic_request = request.get_json(silent=True)
         if not isinstance(anthropic_request, dict):
@@ -155,10 +181,10 @@ def messages():
                 logger.debug(f"[SERVER_DEBUG] Upstream response status code: {response.status_code}")
 
                 if response.status_code != 200:
-                    # 特殊处理429和449速率限制错误，统一转换为429
+                    # 特殊处理429和449速率限制错误，使用SSE流格式返回
                     if response.status_code in [429, 449]:
                         converted_status = 429
-                        logger.debug(f"[SERVER_DEBUG] Got {response.status_code} rate limit error from upstream, converting to {converted_status}")
+                        logger.debug(f"[SERVER_DEBUG] Got {response.status_code} rate limit error from upstream, converting to SSE stream with status {converted_status}")
 
                         # 尝试解析上游错误消息
                         error_message = 'Your account has hit a rate limit.'
@@ -169,18 +195,41 @@ def messages():
                         except:
                             error_message = response.text or error_message
 
-                        error_response = jsonify({
-                            'type': 'error',
-                            'error': {
-                                'type': 'rate_limit_error',
-                                'message': error_message
+                        logger.info(f"[SERVER_DEBUG] Creating rate limit SSE stream for: {error_message}")
+
+                        # 创建SSE格式的错误流响应
+                        def generate_rate_limit_sse():
+                            from app.fixed_sse_generator import FixedSSEGenerator
+                            generator = FixedSSEGenerator(anthropic_request.get('model', ''))
+
+                            # 发送message_start
+                            yield generator._create_message_start()
+
+                            # 发送错误内容
+                            yield generator._create_content_block_start('text')
+                            yield generator._create_content_block_delta(0, 'text_delta', f"[速率限制] {error_message}，请稍后重试")
+                            yield generator._create_content_block_stop(0)
+
+                            # 发送结束事件
+                            yield generator._create_message_delta("end_turn", 0)
+                            yield generator._create_message_stop()
+                            yield generator._create_done()
+
+                        sse_response = Response(
+                            stream_with_context(generate_rate_limit_sse()),
+                            mimetype='text/event-stream',
+                            headers={
+                                'Cache-Control': 'no-cache',
+                                'Connection': 'keep-alive',
+                                'Access-Control-Allow-Origin': '*',
+                                'Access-Control-Allow-Headers': 'Content-Type, Authorization, Anthropic-Version',
+                                # 添加符合Anthropic规范的retry-after头
+                                'retry-after': '60',
+                                'anthropic-ratelimit-requests-limit': '60',
+                                'anthropic-ratelimit-requests-remaining': '0'
                             }
-                        })
-                        # 添加符合Anthropic规范的retry-after头
-                        error_response.headers['retry-after'] = '60'  # 60秒后重试
-                        error_response.headers['anthropic-ratelimit-requests-limit'] = '60'
-                        error_response.headers['anthropic-ratelimit-requests-remaining'] = '0'
-                        return error_response, converted_status
+                        )
+                        return sse_response, converted_status  # 返回转换后的429状态码，而不是200
                     else:
                         return jsonify({
                             'type': 'error',
@@ -189,6 +238,57 @@ def messages():
                                 'message': response.text
                             }
                         }), response.status_code
+
+                # 强制检查上游响应状态码
+                logger.info(f"[449_DEBUG] Stream upstream response status: {response.status_code}")
+                if response.status_code in [429, 449]:
+                    converted_status = 429
+                    logger.info(f"[449_DEBUG] **** CATCHING 449 IN STREAM PROCESSING **** Converting {response.status_code} to SSE stream with status {converted_status}")
+
+                    # 尝试解析上游错误消息
+                    error_message = 'Your account has hit a rate limit.'
+                    try:
+                        error_data = response.json()
+                        if isinstance(error_data, dict):
+                            error_message = error_data.get('msg') or error_data.get('message', error_message)
+                    except:
+                        error_message = response.text or error_message
+
+                    logger.info(f"[SERVER_DEBUG] Creating rate limit SSE stream for: {error_message}")
+
+                    # 创建SSE格式的错误流响应
+                    def generate_rate_limit_sse():
+                        from app.fixed_sse_generator import FixedSSEGenerator
+                        generator = FixedSSEGenerator(anthropic_request.get('model', ''))
+
+                        # 发送message_start
+                        yield generator._create_message_start()
+
+                        # 发送错误内容
+                        yield generator._create_content_block_start('text')
+                        yield generator._create_content_block_delta(0, 'text_delta', f"[速率限制] {error_message}，请稍后重试")
+                        yield generator._create_content_block_stop(0)
+
+                        # 发送结束事件
+                        yield generator._create_message_delta("end_turn", 0)
+                        yield generator._create_message_stop()
+                        yield generator._create_done()
+
+                    sse_response = Response(
+                        stream_with_context(generate_rate_limit_sse()),
+                        mimetype='text/event-stream',
+                        headers={
+                            'Cache-Control': 'no-cache',
+                            'Connection': 'keep-alive',
+                            'Access-Control-Allow-Origin': '*',
+                            'Access-Control-Allow-Headers': 'Content-Type, Authorization, Anthropic-Version',
+                            # 添加符合Anthropic规范的retry-after头
+                            'retry-after': '60',
+                            'anthropic-ratelimit-requests-limit': '60',
+                            'anthropic-ratelimit-requests-remaining': '0'
+                        }
+                    )
+                    return sse_response, converted_status  # 返回转换后的429状态码
 
                 # 创建优化的SSE流
                 model_name = anthropic_request.get('model', '')
@@ -210,6 +310,9 @@ def messages():
 
                 input_tokens = max(1, input_tokens)  # 至少1个token
 
+                # 检查是否是速率限制错误，如果是则返回429状态码
+                response_status = 429 if response.status_code in [429, 449] else 200
+
                 return Response(
                     create_optimized_sse_generator(response, request.headers, model_name, input_tokens),
                     headers={
@@ -218,7 +321,7 @@ def messages():
                         'Connection': 'keep-alive'
                     },
                     mimetype='text/event-stream'
-                )
+                ), response_status
 
             except Exception as e:
                 logger.log_exception(e, "stream messages endpoint")
@@ -262,9 +365,12 @@ def messages():
                     anthropic_response = converter.openai_to_anthropic(openai_response)
                     return jsonify(anthropic_response)
                 else:
+                    # 强制检查非流式响应状态码
+                    logger.info(f"[449_DEBUG] Non-stream upstream response status: {response.status_code}")
                     # 对于HTTP错误状态码，特殊处理429和449速率限制错误
                     if response.status_code in [429, 449]:
                         converted_status = 429
+                        logger.info(f"[449_DEBUG] **** CATCHING 449 IN NON-STREAM PROCESSING **** Converting {response.status_code} to status {converted_status}")
                         # 尝试解析上游错误消息
                         error_message = 'Your account has hit a rate limit.'
                         try:
@@ -287,8 +393,49 @@ def messages():
                         error_response.headers['anthropic-ratelimit-requests-remaining'] = '0'
                         return error_response, converted_status
                     else:
-                        # 其他HTTP错误，直接返回原始响应和状态码，让下游处理
-                        return jsonify(openai_response), response.status_code
+                        # 其他HTTP错误，检查是否包含449错误信息
+                        if response.status_code == 449 or 'status' in str(openai_response):
+                            # 检查响应内容是否包含449错误
+                            response_str = str(openai_response)
+                            if '449' in response_str or 'rate limit' in response_str.lower():
+                                logger.info(f"[SERVER_DEBUG] Detected 449 error in response, converting to proper error format")
+                                error_message = 'You exceeded your current rate limit'
+                                try:
+                                    if isinstance(openai_response, dict):
+                                        error_message = openai_response.get('msg') or openai_response.get('message', error_message)
+                                except:
+                                    pass
+
+                                error_response = jsonify({
+                                    'type': 'error',
+                                    'error': {
+                                        'type': 'rate_limit_error',
+                                        'message': error_message
+                                    }
+                                })
+                                error_response.headers['retry-after'] = '60'
+                                error_response.headers['anthropic-ratelimit-requests-limit'] = '60'
+                                error_response.headers['anthropic-ratelimit-requests-remaining'] = '0'
+                                return error_response, 429
+
+                        # 其他HTTP错误，检查状态码并做相应处理
+                        if response.status_code == 449:
+                            # 明确处理449状态码，转换为标准的429速率限制错误
+                            logger.info(f"[449_DEBUG] **** CATCHING 449 IN FALLBACK PROCESSING **** Converting HTTP 449 status to 429 rate limit error")
+                            error_response = jsonify({
+                                'type': 'error',
+                                'error': {
+                                    'type': 'rate_limit_error',
+                                    'message': 'You exceeded your current rate limit'
+                                }
+                            })
+                            error_response.headers['retry-after'] = '60'
+                            error_response.headers['anthropic-ratelimit-requests-limit'] = '60'
+                            error_response.headers['anthropic-ratelimit-requests-remaining'] = '0'
+                            return error_response, 429
+                        else:
+                            # 其他HTTP错误，直接返回原始响应和状态码，让下游处理
+                            return jsonify(openai_response), response.status_code
 
             except Exception as e:
                 logger.log_exception(e, "non-stream messages endpoint")

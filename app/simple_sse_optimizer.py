@@ -11,8 +11,8 @@ class SimpleSSEOptimizer:
 
     def __init__(self):
         self.logger = get_logger('api_server')
-        self.enabled = True  # 启用修复后的SSE生成器
-        self.interval_ms = 50.0  # 50ms间隔
+        self.enabled = True  # 启用SSE优化器修复UI闪烁问题
+        self.interval_ms = 10.0  # 10ms间隔，与fixed_sse_generator保持一致
 
     def should_optimize(self, request_headers=None, user_agent=None):
         """判断是否应该优化"""
